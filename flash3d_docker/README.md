@@ -19,8 +19,6 @@ CUDA 11.8 container reproducing **Flash3D** (3DV 2025, arXiv 2406.04343) for bot
 ```
 flash3d_docker/
 ├── Dockerfile
-├── demo_infer.py
-├── assets/sample.jpg
 └── output/
 ```
 
@@ -31,14 +29,18 @@ flash3d_docker/
 ```bash
 git clone --recurse-submodules https://github.com/<your-repo>.git
 cd flash3d_docker
-docker build --no-cache -t flash3d .
-
-docker run --gpus all --rm \
+docker build -t flash3d .
+docker run --gpus all -it \
+  -v $(pwd)/data:/workspace/flash3d/data \
   -v $(pwd)/output:/workspace/output \
-  flash3d \
-  python demo_infer.py \
-     --input assets/sample.jpg \
-     --out   output/scene
+  --name flash3d_container flash3d_autorun
+
+python evaluate.py \
+  +experiment=layered_re10k \
+  +dataset.crop_border=true \
+  dataset.test_split_path=splits/re10k_mine_filtered/test_files.txt \
+  model.depth.version=v1 \
+  ++eval.save_vis=true
 ```
 
 ---
@@ -57,7 +59,7 @@ python -m datasets.preprocess_realestate10k -d data/RealEstate10K -s test
 ### 2 Pre-trained Model & Evaluation
 ```bash
 python -m misc.download_pretrained_models -o exp/re10k_v2
-sh evaluate.sh exp/re10k_v2
+bash evaluate.sh exp/re10k_v2
 ```
 
 ### 3 Training (single GPU)
@@ -70,7 +72,7 @@ python train.py \
 
 ### 4 Training (multi-GPU)
 ```bash
-sh train.sh          # edit configs/hydra/cluster as needed
+bash train.sh          # edit configs/hydra/cluster as needed
 ```
 
 ---
