@@ -78,7 +78,42 @@ echo "A large urban park with lush green grass and tall trees surrounding a cent
   > outdoor_park/outdoor_park_PROMPT.txt
 ```
 
-### 2. Run Training (with optional GPT-4V refinement)
+#### CHECK BEFORE NEXT STEP !!
+```bash
+/workspace/DreamScene360
+├── data/
+│   ├── indoor_livingroom/
+│   │   └── indoor_livingroom_PROMPT.txt
+│   └── outdoor_park/
+│       └── outdoor_park_PROMPT.txt
+├── pre_checkpoints/
+│   └── omnidata_dpt_depth_v2.ckpt   ← depth prediction model from dropbox
+├── stitch_diffusion/
+│   └── pretrained_model/
+│       ├── v2-1_512-ema-pruned.safetensors
+│       └── vae-ft-mse-840000-ema-pruned.ckpt
+│   └── download_lora.py → LoRA models (installed)
+└── ...
+```
+
+#### Resolve Version Conflicts (Only if Needed)
+```bash
+cd /workspace/DreamScene360
+
+# 1) huggingface_hub (0.13.3)
+pip install huggingface-hub==0.13.3
+
+# 2) diffusers (0.10.2)
+pip install diffusers==0.10.2
+
+# 3) accelerate · datasets too
+pip install accelerate==0.19.0 datasets==2.12.0
+
+# 4) (GPU: L4) Set Compute Capability
+export TORCH_CUDA_ARCH_LIST=8.9
+```
+
+### 2.1. Run Training (with optional GPT-4V refinement)
 
 ```bash
 export OPENAI_API_KEY=<Your_OpenAI_GPT4V_Key>
@@ -86,14 +121,33 @@ python train.py -s data/Italy_text -m output/italy_demo \
   --self_refinement --api_key $OPENAI_API_KEY --num_prompt 2 --max_rounds 2
 ```
 
+### 2.2. Run Training (without optional GPT-4V refinement)
 > To skip GPT-4V refinement, omit `--self_refinement` and `--api_key`.
+
+```bash
+cd /workspace/DreamScene360
+
+# (1) Inddor Livingroom
+python train.py \
+  -s data/indoor_livingroom \
+  -m output/indoor_livingroom_demo
+
+# (2) Outdoor Park
+python train.py \
+  -s data/outdoor_park \
+  -m output/outdoor_park_demo
+```
 
 ### 3. Export PLY (if not already saved)
 
 ```bash
 python tools/export_ply.py \
-  -i output/italy_demo/iteration_9000/gaussians.pkl \
-  -o output/italy_demo/scene.ply
+  -i output/indoor_livingroom_demo/iteration_9000/gaussians.pkl \
+  -o output/indoor_livingroom_demo/scene.ply
+
+python tools/export_ply.py \
+  -i output/outdoor_park_demo/iteration_9000/gaussians.pkl \
+  -o output/outdoor_park_demo/scene.ply
 ```
 
 ---
