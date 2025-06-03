@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libeigen3-dev libxxf86vm-dev libembree-dev libglm-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# ---------- Micromamba + Python 3.10 ----------
+# ---------- Micromamba + Python 3.8 ----------
 ENV MAMBA_ROOT_PREFIX=/opt/conda
 ENV PATH=$MAMBA_ROOT_PREFIX/bin:$PATH
 RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba && \
