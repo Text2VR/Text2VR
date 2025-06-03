@@ -2,10 +2,11 @@
 
 GPU-ready Docker environments for state-of-the-art 3D generation / reconstruction:
 
-| Folder | Model | Task | CUDA | Framework |
-|--------|-------|------|------|-----------|
-| `worldgen_docker/` | WorldGen + FLUX.1-dev | Text → 3D Mesh (.ply) | 12.1 | PyTorch cu128 |
-| `flash3d_docker/`  | Flash3D | Single image → 3D Scene | 11.8 | PyTorch 2.2.2 |
+| Folder                  | Model                 | Task                                | CUDA | Framework           |
+| ----------------------- | --------------------- | ----------------------------------- | ---- | ------------------- |
+| `worldgen_docker/`      | WorldGen + FLUX.1-dev | Text → 3D Mesh (.ply)               | 12.1 | PyTorch cu128       |
+| `flash3d_docker/`       | Flash3D               | Single image → 3D Scene             | 11.8 | PyTorch 2.2.2       |
+| `dreamscene360_docker/` | DreamScene360         | Text → 3D Scene (multi-view + .ply) | 12.4 | PyTorch 2.4.0 cu124 |
 
 ---
 
@@ -28,22 +29,27 @@ docker run --gpus all -it \
   -v $(pwd)/data:/workspace/flash3d/data \
   -v $(pwd)/output:/workspace/output \
   --name flash3d_container flash3d_autorun
+cd ..
 
-python evaluate.py \
-  +experiment=layered_re10k \
-  +dataset.crop_border=true \
-  dataset.test_split_path=splits/re10k_mine_filtered/test_files.txt \
-  model.depth.version=v1 \
-  ++eval.save_vis=true
+# DreamScene360 demo
+cd dreamscene360_docker
+docker build -t dreamscene360:cu124 .
+docker run --gpus all -it --rm \
+  -v $(pwd)/DreamScene360:/workspace/DreamScene360 \
+  -v $(pwd)/pretrained:/workspace/DreamScene360/pre_checkpoints \
+  dreamscene360:cu124
+
+# Once inside the container, follow the instructions in:
+#   /workspace/DreamScene360/README.md
 ```
 
 ---
 
 ## ➕ Add a New Model
 
-1. Create `<model>_docker/` with `Dockerfile`, scripts, `output/`.  
-2. Write `<model>_docker/README.md`.  
-3. Add the folder to the table above.  
+1. Create `<model>_docker/` with `Dockerfile`, scripts, `output/`.
+2. Write `<model>_docker/README.md`.
+3. Add the folder to the table above.
 4. Follow this CLI pattern:
 
 ```bash
