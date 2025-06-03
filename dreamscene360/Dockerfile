@@ -1,5 +1,39 @@
-# syntax=docker/dockerfile:1
+####################################################################################################################################################################
+# Dockerfile for DreamScene360 with CUDA 12.4 support
+# This Dockerfile sets up a GPU-enabled environment for DreamScene360 using CUDA 12.4 and Ubuntu 20.04.
 
+# Usage:
+# 1. Clean up Docker system (optional, but recommended)
+# docker system prune -af --volumes
+
+# 2. Build the Docker image with CUDA 12.4 support
+# docker build -t dreamscene360:cu124 .
+
+# 3. Download ckpt from dropbox (at '~/dreamscene360_docker/pre_checkpoints')
+
+# 4. Run the container with GPU support and bind mounts
+# docker run --gpus all -it \
+#  -v ~/dreamscene360_docker/data:/workspace/DreamScene360/data \
+#  -v ~/dreamscene360_docker/output:/workspace/DreamScene360/output \
+#  -v ~/dreamscene360_docker/pre_checkpoints:/workspace/DreamScene360/pre_checkpoints \
+#  dreamscene360:cu124
+
+# 5. Install additional submodules for DreamScene360
+# pip install submodules/diff-gaussian-rasterization-depth # Rasterizer for RGB and depth
+# pip install submodules/simple-knn
+
+# 6. Download required pretrained models for text2pano:
+# cd stitch_diffusion/pretrained_model
+# wget https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors -O stable-diffusion-2-1-base.safetensors
+# cd ../vae
+# wget https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt -O stablediffusion.vae.pt
+# cd ..
+# python download_lora.py
+# cd ..
+####################################################################################################################################################################
+
+
+# syntax=docker/dockerfile:1
 ############################################
 # DreamScene360 – GPU-enabled Docker image #
 #   CUDA 12.x / Ubuntu 20.04 LTS           #
