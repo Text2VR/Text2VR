@@ -62,8 +62,8 @@ RUN git clone --recurse-submodules https://github.com/ZiYang-xie/WorldGen.git
 
 # [10] WorldGen 설치
 WORKDIR /app/WorldGen
-# RUN pip install -e submodules/UniK3D
-# RUN pip install .
+RUN pip install -e submodules/UniK3D
+RUN pip install .
 
 # [11] generate_both.py 복사
 COPY generate_both.py /app/WorldGen/generate_both.py
