@@ -1,4 +1,4 @@
-Directory of output data that mount on docker container
+Directory of data that mount on docker container
 
 ```bash
 docker run --gpus all -it \
