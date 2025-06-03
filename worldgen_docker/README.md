@@ -58,6 +58,12 @@ huggingface-cli login   # use a Read-scoped token
 ```
 
 ---
+## 🔥 RUN
+```
+python generate_both.py
+```
+
+---
 
 ## 📂 Output Example
 ```
