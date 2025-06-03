@@ -78,7 +78,7 @@ output/
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `GatedRepoError` | FLUX.1-dev requires approval | Click **Request access**, wait, rerun |
+| `GatedRepoError` | FLUX.1-dev requires approval | Click **Request access**, wait, rerun.<br/> (or just enrolling huggingface token and done) |
 | `libGL.so.1` missing | OpenGL runtime | `apt-get install libgl1` (pre-installed) |
 | Slow first run | Large model download | Mount HF cache: `-v ~/.cache/huggingface:/root/.cache/huggingface` |
 
