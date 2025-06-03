@@ -68,9 +68,14 @@ cd ../..
 ### 1. Write Prompt
 
 ```bash
-mkdir -p data/Italy_text
-echo "A cozy Italian village square at sunset, warm lights, cobblestone, terraces with flowers" > \
-  data/Italy_text/Italy_text_PROMPT.txt
+cd /workspace/DreamScene360/data
+mkdir -p indoor_livingroom
+echo "A spacious modern living room with white marble floors, two gray fabric sofas facing each other, and a small wooden coffee table with a green potted plant by the window. Warm orange evening sunlight filters through, casting a cozy and inviting glow on the walls." \
+  > indoor_livingroom/indoor_livingroom_PROMPT.txt
+
+mkdir -p outdoor_park
+echo "A large urban park with lush green grass and tall trees surrounding a central fountain, distant city skyscrapers visible on the skyline, bright midday sunlight, gentle breeze rustling leaves, with children playing near the fountain, creating a refreshing and lively scene." \
+  > outdoor_park/outdoor_park_PROMPT.txt
 ```
 
 ### 2. Run Training (with optional GPT-4V refinement)
