@@ -19,6 +19,7 @@
 #  dreamscene360:cu124
 
 # 5. Install additional submodules for DreamScene360
+# export TORCH_CUDA_ARCH_LIST=8.9
 # pip install submodules/diff-gaussian-rasterization-depth # Rasterizer for RGB and depth
 # pip install submodules/simple-knn
 
