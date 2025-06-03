@@ -27,7 +27,10 @@ worldgen_docker/
 ## 🚀 Quick Start
 
 ```bash
-git clone --recurse-submodules https://github.com/<your-repo>.git
+# git clone --recurse-submodules https://github.com/<your-repo>.git
+
+# in docker image, miniconda and mamba may not be needed !!!
+
 cd worldgen_docker
 docker build --no-cache -t worldgen .
 docker run --gpus all --rm \

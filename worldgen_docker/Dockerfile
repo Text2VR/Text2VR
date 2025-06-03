@@ -34,7 +34,7 @@ RUN apt-get update && \
     libgl1 && \
     rm -rf /var/lib/apt/lists/*
 
-# [4] Miniconda 설치
+# [4] Miniconda 설치 (필요 없을 수도 있음)
 ARG CONDA_VERSION="py311_23.11.0-2"
 ARG MINICONDA_INSTALLER_URL="https://repo.anaconda.com/miniconda/Miniconda3-${CONDA_VERSION}-Linux-x86_64.sh"
 RUN wget ${MINICONDA_INSTALLER_URL} -O /tmp/miniconda.sh && \
@@ -42,7 +42,7 @@ RUN wget ${MINICONDA_INSTALLER_URL} -O /tmp/miniconda.sh && \
     rm /tmp/miniconda.sh && \
     /opt/conda/bin/conda clean --all -y
 
-# [5] mamba 설치 (안정 버전)
+# [5] mamba 설치 (안정 버전, 필요 없을 수도 있음)
 RUN /opt/conda/bin/conda install -y -c conda-forge mamba=1.4.2 && \
     /opt/conda/bin/mamba update -y --all
 
