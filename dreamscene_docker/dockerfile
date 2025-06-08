@@ -1,0 +1,61 @@
+# Base: CUDA 11.8 + cuDNN
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+# 환경변수
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=$CUDA_HOME/bin:$PATH
+ENV LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+ENV TORCH_CUDA_ARCH_LIST="8.6"
+
+# 작업 디렉토리
+WORKDIR /workspace
+
+# 기본 패키지 설치
+RUN apt-get update && apt-get install -y \
+    git curl wget vim build-essential cmake ninja-build ffmpeg \
+    libgl1 libglib2.0-0 \
+    python3.10 python3.10-venv python3-pip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# python/pip 심볼릭 링크 및 최신화
+RUN ln -sf python3.10 /usr/bin/python && \
+    ln -sf pip3 /usr/bin/pip && \
+    pip install --upgrade pip setuptools wheel
+
+# DreamScene clone
+RUN git clone https://github.com/DreamScene-Project/DreamScene.git
+
+# PyTorch (CUDA 11.8) + numpy<2 설치
+RUN pip install torch==2.2.0+cu118 torchvision==0.17.0+cu118 torchaudio==2.2.0+cu118 \
+    -f https://download.pytorch.org/whl/cu118/torch_stable.html && \
+    pip install "numpy<2"
+
+# requirements 설치 (의존성 포함)
+COPY requirements.txt ./
+RUN pip install -r requirements.txt -f https://download.pytorch.org/whl/cu118/torch_stable.html
+
+# comp-diff-gaussian-rasterization 설치
+RUN git clone --recursive https://github.com/DreamScene-Project/comp-diff-gaussian-rasterization.git && \
+    pip install ./comp-diff-gaussian-rasterization
+
+# simple-knn 설치
+RUN git clone https://github.com/YixunLiang/simple-knn.git && \
+    pip install ./simple-knn
+
+# pytorch3d 설치
+RUN pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+
+# Cap3D 및 point-e 설치
+RUN git clone https://github.com/crockwell/Cap3D.git
+WORKDIR /workspace/Cap3D/text-to-3D/point-e
+RUN pip install -e . && mkdir -p ./point_e_model_cache
+
+# 작업 디렉토리 복귀
+WORKDIR /workspace
+
+# 디버깅: PyTorch/CUDA 버전 확인
+RUN python -c "import torch; print('Torch:', torch.__version__, '| CUDA:', torch.version.cuda)"
+
+# 기본 실행 쉘
+CMD ["/bin/bash"]
