@@ -7,6 +7,7 @@ GPU-ready Docker environments for state-of-the-art 3D generation / reconstructio
 | `worldgen_docker/`      | WorldGen + FLUX.1-dev | Text → 3D Mesh (.ply)               | 12.1 | PyTorch cu128       |
 | `flash3d_docker/`       | Flash3D               | Single image → 3D Scene             | 11.8 | PyTorch 2.2.2       |
 | `dreamscene360_docker/` | DreamScene360         | Text → 3D Scene (multi-view + .ply) | 12.4 | PyTorch 2.4.0 cu124 |
+| `dreamscene_docker/`    | dreamscene            | Text → 3D Mesh (.ply)               | 11.8 | PyTorch cu118       |
 
 ---
 
@@ -16,12 +17,14 @@ GPU-ready Docker environments for state-of-the-art 3D generation / reconstructio
 git clone --recurse-submodules https://github.com/<your-repo>.git
 cd <your-repo>
 
+# ----------------------------------------------------
 # WorldGen demo
 cd worldgen_docker
 docker build -t worldgen .
 docker run --gpus all --rm -v $(pwd)/output:/app/WorldGen/output worldgen
 cd ..
 
+# ----------------------------------------------------
 # Flash3D demo
 cd flash3d_docker
 docker build -t flash3d .
@@ -31,6 +34,7 @@ docker run --gpus all -it \
   --name flash3d_container flash3d_autorun
 cd ..
 
+# ----------------------------------------------------
 # DreamScene360 demo
 cd dreamscene360_docker
 docker build -t dreamscene360:cu124 .
@@ -41,6 +45,26 @@ docker run --gpus all -it --rm \
 
 # Once inside the container, follow the instructions in:
 #   /workspace/DreamScene360/README.md
+
+# ----------------------------------------------------
+# DreamScene demo
+cd dreamscene_docker
+
+# Build the Docker image (CUDA 11.8 + cuDNN)
+docker build -t dreamscene:cu118 .
+
+# Run the container with GPU and mount output directory
+docker run --gpus all -it --rm \
+  -v $(pwd)/DreamScene:/workspace/DreamScene \
+  -v $(pwd)/output:/workspace/output \
+  dreamscene:cu118
+
+# Once inside the container:
+# 1. Navigate to DreamScene directory
+# 2. Run training using your config:
+#    CUDA_VISIBLE_DEVICES=0 python main.py --object --config configs/objects/sample.yaml
+# ----------------------------------------------------
+
 ```
 
 ---
