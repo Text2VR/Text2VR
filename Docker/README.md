@@ -50,11 +50,18 @@ docker build -t text2vr-dev:latest -f Docker/Dockerfile .
 This is the most important step. Run this command from the root of your `Text2VR` repository to start the container.
 
 ```bash
-docker run --gpus all -it --rm \
+docker run --gpus all -it --name text2vr_container \
   -v "$(pwd)/DreamScene360:/workspace/DreamScene360" \
   -v "$(pwd)/output/dreamscene360:/workspace/DreamScene360/output" \
-  -v "$(pwd)/pre_checkpoints/dreamscene360:/workspace/DreamScene360/pre_checkpoints" \
+  -v "$(pwd)/pre_checkpoints:/workspace/DreamScene360/pre_checkpoints" \
   text2vr-dev:latest
+```
+
+> TIP
+```bash
+docker start text2vr_container
+docker exec -it text2vr_container /bin/bash
+docker rm text2vr_container
 ```
 
 ### Explanation of Volume Mounts (-v):
@@ -86,6 +93,25 @@ python download_lora.py
 cd ../../
 ```
 
+Result:
+```bash
+/workspace/DreamScene360
+├── data/
+│   ├── indoor_livingroom/
+│   │   └── indoor_livingroom_PROMPT.txt
+│   └── outdoor_park/
+│       └── outdoor_park_PROMPT.txt
+├── pre_checkpoints/
+│    └── big-lama.ckpt                   
+│    └── omnidata_dpt_depth_v2.ckpt      
+│    └── monidata_dpt_normal_v2.ckpt     
+├── stitch_diffusion/
+│   └── pretrained_model/
+│       ├── v2-1_512-ema-pruned.safetensors
+│       └── vae-ft-mse-840000-ema-pruned.ckpt
+│   └── download_lora.py → LoRA models (installed)
+└── ...
+```
 ---
 
 ## 4. Example: Text-to-3D Scene Generation
@@ -98,10 +124,14 @@ The `data` directory is mounted from your host, so any files created here will p
 
 ```bash
 # The current directory is /workspace/DreamScene360
-mkdir -p data/indoor_livingroom
-
+cd /workspace/DreamScene360/data
+mkdir -p indoor_livingroom
 echo "A spacious modern living room with white marble floors, two gray fabric sofas facing each other, and a small wooden coffee table with a green potted plant by the window. Warm orange evening sunlight filters through, casting a cozy and inviting glow on the walls." \
-  > data/indoor_livingroom/indoor_livingroom_PROMPT.txt
+  > indoor_livingroom/indoor_livingroom_PROMPT.txt
+
+mkdir -p outdoor_park
+echo "A large urban park with lush green grass and tall trees surrounding a central fountain, distant city skyscrapers visible on the skyline, bright midday sunlight, gentle breeze rustling leaves, with children playing near the fountain, creating a refreshing and lively scene." \
+  > outdoor_park/outdoor_park_PROMPT.txt
 ```
 
 ### 4.2. Run Training
@@ -119,8 +149,17 @@ python train.py -s data/your_scene -m output/your_scene_refined \
 
 **To run without GPT-4V refinement:**
 ```bash
-# Example for the living room prompt
-python train.py -s data/indoor_livingroom -m output/indoor_livingroom_demo
+cd /workspace/DreamScene360
+
+# (1) Inddor Livingroom
+python train.py \
+  -s data/indoor_livingroom \
+  -m output/indoor_livingroom_demo
+
+# (2) Outdoor Park
+python train.py \
+  -s data/outdoor_park \
+  -m output/outdoor_park_demo
 ```
 
 ### 4.3. Export PLY File
@@ -129,6 +168,10 @@ After training is complete, export the Gaussian Splatting data to a `.ply` file.
 python tools/export_ply.py \
   -i output/indoor_livingroom_demo/iteration_9000/gaussians.pkl \
   -o output/indoor_livingroom_demo/scene.ply
+
+python tools/export_ply.py \
+  -i output/outdoor_park_demo/iteration_9000/gaussians.pkl \
+  -o output/outdoor_park_demo/scene.ply
 ```
 
 ---
