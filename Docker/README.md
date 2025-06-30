@@ -23,22 +23,25 @@ mkdir -p ./pre_checkpoints/dreamscene360
 Your porject structure should look like this:
 ```bash
 Text2VR/
-├── Dockerfile                  # <-- The new Dockerfile
-├── DreamScene360/              # <-- Your DreamScene360 source code
+├── Docker/                             # <-- Directory for Dockerfiles
+│   └── Dockerfile                      # <-- e.g.) DreamScene360 Dockerfile
+├── DreamScene360/                      # <-- Your DreamScene360 source code
 ├── output/
-│   └── dreamscene360/          # <-- Generated scenes will be saved here
+│   └── dreamscene360/                  # <-- Generated scenes will be saved here
 └── pre_checkpoints/
-    └── dreamscene360/          # <-- Pretrained models will be placed here
+    └── big-lama.ckpt                   # <-- Pretrained models will be placed here
+    └── omnidata_dpt_depth_v2.ckpt      # <-- Pretrained models will be placed here
+    └── monidata_dpt_normal_v2.ckpt     # <-- Pretrained models will be placed here
 ```
 
 ### 1.2. Download Checkpoints
-Download the omnidata_dpt_depth_v2.ckpt file from the official from this [Dropbox folder](https://www.dropbox.com/scl/fo/348s01x0trt0yxb934cwe/h?rlkey=a96g2incso7g53evzamzo0j0y&dl=0) and place it in `Text2VR/pre_checkpoints/dreamscene360/` directory.
+Download the omnidata_dpt_depth_v2.ckpt file from the official from this [Dropbox folder](https://www.dropbox.com/scl/fo/348s01x0trt0yxb934cwe/h?rlkey=a96g2incso7g53evzamzo0j0y&dl=0) and place it in `Text2VR/pre_checkpoints/` directory.
 
 ### 1.3. Build the Docker Image
 From the root directory of your `Text2VR` repository, run the following command to build the base development environment image.
 
 ```bash
-docker build -t text2vr-dev:latest .
+docker build -t text2vr-dev:latest -f Docker/Dockerfile .
 ```
 
 ---
