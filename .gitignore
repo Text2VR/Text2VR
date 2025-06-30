@@ -1,0 +1,23 @@
+# =================================================================
+# General Python / IDE files to ignore
+# =================================================================
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+
+# =================================================================
+# Project Specific - Ignore large files and generated outputs
+# =================================================================
+
+# Ignore all content inside the output folders
+/output/*
+
+# Ignore all content inside the pre_checkpoints folders,
+# but KEEP the empty directories themselves.
+/pre_checkpoints/*
+!/pre_checkpoints/.gitkeep
+
+# You can add more specific folders if needed
+# For example, to ignore a specific checkpoint file:
+# /pre_checkpoints/dreamscene360/omnidata_dpt_depth_v2.ckpt
