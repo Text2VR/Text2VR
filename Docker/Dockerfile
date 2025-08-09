@@ -100,7 +100,9 @@ echo "🎯 Environment is ready!"' > /workspace/test_env.sh && \
     
 # Add auto-activation to the bash startup script.
 # This ensures any new interactive bash shell will start inside the 'dev' env.
-RUN echo "micromamba activate dev" >> /root/.bashrc
+# shell initialization and auto-activation to the bash startup script.
+RUN echo 'eval "$(micromamba shell hook --shell bash)"' >> /root/.bashrc && \
+    echo 'micromamba activate dev' >> /root/.bashrc
 
 # Set the final working directory and default command.
 WORKDIR /workspace/DreamScene360

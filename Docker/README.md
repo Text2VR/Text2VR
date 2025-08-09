@@ -59,6 +59,7 @@ docker run --gpus all -it --name text2vr_container \
 
 > TIP
 ```bash
+docker builder prune
 docker start text2vr_container
 docker exec -it text2vr_container /bin/bash
 docker rm text2vr_container
@@ -76,6 +77,9 @@ docker rm text2vr_container
 After the container starts, you'll be inside a `bash` shell. You only need to run this setup once per image unless you rebuild it.
 
 ```bash
+# if no python or wget, then
+echo 'eval "$(micromamba shell hook --shell bash)"' >> /root/.bashrc && echo 'micromamba activate dev' >> /root/.bashrc
+
 # You are now inside the container, at /workspace/DreamScene360
 # Download pretrained models for the Text-to-Pano pipeline.
 cd stitch_diffusion/pretrained_model
@@ -122,6 +126,11 @@ cd /workspace/DreamScene360/data
 mkdir -p indoor_livingroom
 echo "A spacious modern living room with white marble floors, two gray fabric sofas facing each other, and a small wooden coffee table with a green potted plant by the window. Warm orange evening sunlight filters through, casting a cozy and inviting glow on the walls." \
   > indoor_livingroom/indoor_livingroom_PROMPT.txt
+
+# or
+echo "A 360-degree equirectangular panorama of a spacious and minimalist modern living room, captured as a professional photorealistic interior shot in 8k UHD with sharp focus. The room features a polished white marble floor and clean white walls. Positioned centrally are two clearly separated gray fabric sofas facing each other, with a low, simple wooden coffee table between them. Next to a large floor-to-ceiling window, a single distinct green potted plant in a ceramic pot rests on the floor. The entire scene is bathed in the warm, orange glow of low-angle evening sunlight streaming through the window, casting long, soft shadows and creating a cozy, serene, and inviting atmosphere." \
+  > indoor_livingroom/indoor_livingroom_PROMPT.txt
+
 
 mkdir -p outdoor_park
 echo "A large urban park with lush green grass and tall trees surrounding a central fountain, distant city skyscrapers visible on the skyline, bright midday sunlight, gentle breeze rustling leaves, with children playing near the fountain, creating a refreshing and lively scene." \
