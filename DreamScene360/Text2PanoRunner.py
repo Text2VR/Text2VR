@@ -37,4 +37,12 @@ class Text2PanoRunner:
         os.system(final_args)
 
 
+runner = Text2PanoRunner(
+      api_key="",
+      testfile="testsample.txt",  # 텍스트 프롬프트 파일
+      num_img=1,
+      num_prompt=3,
+      max_rounds=3
+  )
+runner.run_command()
 

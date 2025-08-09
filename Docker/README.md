@@ -77,20 +77,14 @@ After the container starts, you'll be inside a `bash` shell. You only need to ru
 
 ```bash
 # You are now inside the container, at /workspace/DreamScene360
-
-# 1. Compile CUDA-based submodules. The L4 GPU's Compute Capability is 8.9.
-export TORCH_CUDA_ARCH_LIST=8.9
-pip install submodules/diff-gaussian-rasterization-depth
-pip install submodules/simple-knn
-
-# 2. Download pretrained models for the Text-to-Pano pipeline.
+# Download pretrained models for the Text-to-Pano pipeline.
 cd stitch_diffusion/pretrained_model
-wget [https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors](https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors) -O stable-diffusion-2-1-base.safetensors
+wget https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors -O stable-diffusion-2-1-base.safetensors
 cd ../vae
-wget [https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt](https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt) -O stablediffusion.vae.pt
+wget https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt -O stablediffusion.vae.pt
 cd ..
 python download_lora.py
-cd ../../
+cd ..
 ```
 
 Result:
@@ -143,8 +137,8 @@ You can run the training process with or without GPT-4V refinement for prompts.
 # Make sure to set your OpenAI API key
 export OPENAI_API_KEY=<Your_OpenAI_GPT4V_Key>
 
-python train.py -s data/your_scene -m output/your_scene_refined \
-  --self_refinement --api_key $OPENAI_API_KEY --num_prompt 2 --max_rounds 2
+python train.py -s data/Italy_text -m output/Italy \
+ —self_refinement —api_key "yourt-api-key" —num_prompt 2 —max_rounds 2 —debug
 ```
 
 **To run without GPT-4V refinement:**
