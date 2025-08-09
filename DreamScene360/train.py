@@ -131,6 +131,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             perturbation_render_pkg = render(perturbation_viewpoint_cam, gaussians, pipe, bg)
             perturbation_image, perturbation_rendered_depth= perturbation_render_pkg["render"], perturbation_render_pkg["depth"]
+            
             ### perturbation depth loss
             pred_depth = estimate_depth(perturbation_image)
             loss_perturbation_depth =   (1 - pearson_corrcoef(rendered_depth.reshape(-1, 1)[:, 0], - gt_depth.reshape(-1, 1)[:, 0]))
@@ -166,11 +167,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             training_report(tb_writer, iteration, Ll1, loss_feature, loss_depth, loss, l1_loss, loss_perturbation_depth, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background)) ###
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
+                scene.save(iteration)
+                
+                ############################# EXPORTING FOR UNITY #############################
                 print(f"\n[EXPORTING FOR UNITY] Saving .ply file for iteration {iteration}...")
                 ply_path = os.path.join(scene.model_path, f"point_cloud_iter_{iteration}.ply")
                 scene.gaussians.save_ply(ply_path)
                 print(f"-> Saved: {ply_path}")
-                scene.save(iteration)
+                ###############################################################################
 
             # Densification
             if iteration < opt.densify_until_iter:
