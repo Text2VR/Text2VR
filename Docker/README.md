@@ -194,7 +194,7 @@ cd ..
 ### 5.2. Launch the Viewer
 ```bash
 # Example for the living room scene
-./SIBR_viewers/build/bin/SIBR_gaussianViewer_app -m output/indoor_livingroom_demo
+./SIBR_viewers/install/bin/SIBR_gaussianViewer_app -m output/indoor_livingroom_demo
 ```
 *Use WASD/IJKLUO keys to navigate, or switch to Trackball mode via GUI.*
 
