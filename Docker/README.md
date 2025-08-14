@@ -17,7 +17,7 @@ Ensure the `Dockerfile` is located at the root of your `Text2VR` repository. The
 # e.g., /home/ckdals1380/Text2VR
 
 mkdir -p ./output/dreamscene360
-mkdir -p ./pre_checkpoints/dreamscene360
+mkdir -p ./pre_checkpoints
 ```
 
 Your porject structure should look like this:
