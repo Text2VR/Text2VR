@@ -60,8 +60,9 @@ docker run --gpus all -it --name text2vr_container \
 > TIP
 ```bash
 docker builder prune
-docker start text2vr_container
+docker start text2vr_container # text2vr_isolated_test_container
 docker exec -it text2vr_container /bin/bash
+docker exec -it text2vr_isolated_test_container /bin/bash
 docker rm text2vr_container
 ```
 
@@ -128,7 +129,7 @@ echo "A spacious modern living room with white marble floors, two gray fabric so
   > indoor_livingroom/indoor_livingroom_PROMPT.txt
 
 # or
-echo "A 360-degree equirectangular panorama of a spacious and minimalist modern living room, captured as a professional photorealistic interior shot in 8k UHD with sharp focus. The room features a polished white marble floor and clean white walls. Positioned centrally are two clearly separated gray fabric sofas facing each other, with a low, simple wooden coffee table between them. Next to a large floor-to-ceiling window, a single distinct green potted plant in a ceramic pot rests on the floor. The entire scene is bathed in the warm, orange glow of low-angle evening sunlight streaming through the window, casting long, soft shadows and creating a cozy, serene, and inviting atmosphere." \
+echo "A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus." \
   > indoor_livingroom/indoor_livingroom_PROMPT.txt
 
 
