@@ -60,9 +60,10 @@ docker run --gpus all -it --name text2vr_container \
 > TIP
 ```bash
 docker builder prune
-docker start text2vr_container # text2vr_isolated_test_container
+docker start text2vr_container 
+# docker start  text2vr_isolated_test_container
 docker exec -it text2vr_container /bin/bash
-docker exec -it text2vr_isolated_test_container /bin/bash
+# docker exec -it text2vr_isolated_test_container /bin/bash
 docker rm text2vr_container
 ```
 
