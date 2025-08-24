@@ -1,76 +1,421 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Conservative panorama segmentation for VR assets:
+- Use GPT to propose candidate object labels from a whitelisted vocabulary.
+- Use GroundingDINO for text-conditioned detection with conservative filters.
+- Use SAM to segment final kept boxes.
+- Print and save ONLY the labels that produced at least one final mask.
+"""
+
+import os
+import cv2
+import json
+import base64
 import torch
 import numpy as np
-from PIL import Image
-import cv2
-import os
-import json
-import requests
-import base64
 import argparse
-from typing import List, Dict
+import requests
+from PIL import Image
+from typing import List, Dict, Any, Tuple, Optional
 
-# --- Dependency Availability Check ---
+# ==============================
+# Optional dependency guards
+# ==============================
 try:
     from segment_anything import sam_model_registry, SamPredictor
     SAM_AVAILABLE = True
-except ImportError:
-    print("⚠️ Warning: segment_anything library not found.")
+except Exception as e:
+    print("⚠️ segment_anything import failed:", repr(e))
     SAM_AVAILABLE = False
+
+TRANSFORMERS_AVAILABLE = True
 try:
-    from transformers import pipeline
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    print("⚠️ Warning: transformers library not found.")
+    # Use the model-specific class to avoid Auto* → generation → accelerate chain
+    from transformers import GroundingDinoForObjectDetection
+except Exception as e:
+    print("⚠️ transformers import failed:", repr(e))
     TRANSFORMERS_AVAILABLE = False
 
-# --- OpenAI GPT-4V Integration ---
+
+# ==============================
+# Label control (vocab/synonyms/blacklist)
+# ==============================
+ALLOWED_LABELS = {
+    # seating
+    "sofa", "couch", "armchair", "chair", "stool", "bench",
+    # tables
+    "table", "coffee table", "side table",
+    # decor / appliances
+    "plant", "potted plant", "lamp", "floor lamp",
+    "cabinet", "shelf", "bookshelf", "tv", "television",
+}
+BLACKLIST_LABELS = {
+    # background-like
+    "door", "window", "wall", "floor", "ceiling", "sky", "balcony", "frame", "stairs",
+    # too amorphous
+    "shadow", "light", "reflection", "curtain"
+}
+SYNONYMS = {
+    "couch": "sofa",
+    "television": "tv",
+    "potted plant": "plant",
+    "curtains": "curtain",
+}
+DEFAULT_FALLBACK = ["sofa", "chair", "table", "plant", "lamp", "bench"]
+
+# Selection / filtering hyper-params
+MIN_PROMPTS = 1
+MAX_PROMPTS = 3
+BOX_THRESHOLD = 0.30
+TEXT_THRESHOLD = 0.25
+MIN_AREA_RATIO = 0.01      # at least 1% of image
+MAX_AREA_RATIO = 0.30      # at most 30% of image
+
+# Priority order to ensure ≥1 object
+PREFERRED_ORDER = [
+    "sofa", "couch", "armchair", "chair", "bench", "stool",
+    "table", "coffee table", "side table",
+    "plant", "lamp", "floor lamp", "tv", "cabinet", "bookshelf"
+]
+
+# Conservative filtering against windows/doors (context)
+CONTEXT_EXCLUDE_LABELS = ["window", "door"]   # used only for exclusion, never as assets
+EXCLUSION_BOX_TH = 0.25
+EXCLUSION_TEXT_TH = 0.25
+EXCLUSION_PAD_RATIO = 0.02    # expand exclusion boxes by 2% of min(W,H)
+EXCLUSION_IOU = 0.20          # if IoU with exclusion > 0.20 -> drop
+EXCLUSION_IOU_PLANT = 0.10    # plants are stricter
+EXCLUSION_CENTER_RULE = True  # also drop if center lies inside exclusion
+
+# Cross-label NMS to avoid duplicate assets (e.g., armchair vs. sofa of same object)
+CROSS_LABEL_NMS_IOU = 0.60
+
+
+# ==============================
+# OpenAI Vision (GPT-4o family)
+# ==============================
 def get_asset_prompts_from_gpt(image_path: str, api_key: str) -> List[str]:
-    """
-    Analyzes a panorama with GPT-4V and generates a list of asset prompts.
-    """
-    print("🧠 Contacting GPT-4V to analyze the panorama and identify assets...")
+    """Ask GPT-4o to return asset-like nouns from a constrained vocabulary."""
+    print("🧠 Contacting GPT-4o to analyze the panorama and identify assets...")
     if not api_key or api_key == "your_openai_api_key_here":
         print("❌ ERROR: OpenAI API key is not provided or is a placeholder.")
         return []
 
-    def encode_image_to_base64(path):
-        with open(path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
+    def encode_image_to_base64(path: str) -> str:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
 
-    base64_image = encode_image_to_base64(image_path)
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    allowed_str = ", ".join(sorted(ALLOWED_LABELS))
+    banned_str = ", ".join(sorted(BLACKLIST_LABELS))
+    b64 = encode_image_to_base64(image_path)
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    prompt_text = (
+        "Analyze this panoramic interior image. Select up to 5 distinct, opaque, movable, "
+        "well-bounded objects suitable for interaction in VR. "
+        f"Choose ONLY from this vocabulary: {allowed_str}. "
+        f"DO NOT include any of: {banned_str}. "
+        "Return ONLY a comma-separated list of simple, lowercase, singular nouns (from the vocabulary)."
+    )
     payload = {
-        "model": "gpt-4-vision-preview",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Analyze this panoramic image of a scene. List the primary, distinct, segmentable objects that could be interactive assets. Ignore general background elements like walls, floors, ceilings, sky, and windows. Return ONLY a comma-separated list of simple, lowercase, singular nouns. For example: sofa, chair, table, plant, lamp, car, tree"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
-                ]
-            }
-        ],
-        "max_tokens": 100
+        "model": "gpt-4o-mini",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+            ],
+        }],
+        "max_tokens": 100,
     }
+
     try:
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-        response.raise_for_status()
-        content = response.json()['choices'][0]['message']['content']
-        prompts = [p.strip() for p in content.split(',') if p.strip()]
-        print(f"✅ GPT-4V identified the following assets: {prompts}")
+        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=60)
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        prompts = [p.strip().lower() for p in content.split(",") if p.strip()]
+        print(f"✅ GPT raw labels: {prompts}")
         return prompts
     except Exception as e:
-        print(f"❌ ERROR: Failed to get prompts from GPT-4V: {e}")
+        err_body = ""
+        if hasattr(e, "response") and getattr(e, "response") is not None:
+            try:
+                err_body = e.response.text
+            except Exception:
+                pass
+        print(f"❌ ERROR: GPT request failed: {e} {(' :: ' + err_body) if err_body else ''}")
         return []
 
-# --- Main GroundedSAM Class ---
-class HuggingFaceGroundedSAM:
+
+# ==============================
+# Label post-processing
+# ==============================
+def normalize_and_filter_labels(labels: List[str]) -> List[str]:
+    """Normalize synonyms, apply whitelist/blacklist, deduplicate."""
+    out: List[str] = []
+    for lab in labels:
+        lab = SYNONYMS.get(lab.strip().lower(), lab.strip().lower())
+        if lab in BLACKLIST_LABELS:
+            continue
+        if (lab in ALLOWED_LABELS) or (lab in SYNONYMS.values()):
+            if lab not in out:
+                out.append(lab)
+    return out
+
+
+# ==============================
+# Processor loader + post-process compatibility
+# ==============================
+def _load_grounding_processor(model_id: str):
+    """Robust processor loader across Transformers versions."""
+    e1 = e2 = e3 = None
+    try:
+        from transformers import AutoProcessor
+        return AutoProcessor.from_pretrained(model_id)
+    except Exception as ex:
+        e1 = ex
+    try:
+        from transformers import GroundingDinoProcessor
+        return GroundingDinoProcessor.from_pretrained(model_id)
+    except Exception as ex:
+        e2 = ex
+    try:
+        from transformers.models.auto.processing_auto import AutoProcessor as SubAuto
+        return SubAuto.from_pretrained(model_id)
+    except Exception as ex:
+        e3 = ex
+    raise RuntimeError(
+        f"Failed to load processor for {model_id}:\n"
+        f"- top-level AutoProcessor error: {e1}\n"
+        f"- GroundingDinoProcessor error: {e2}\n"
+        f"- submodule AutoProcessor error: {e3}"
+    )
+
+
+def _post_process_compat(processor, outputs, input_ids, target_sizes,
+                         box_threshold: float, text_threshold: float):
+    """
+    Transformers >=4.55 uses `threshold`; older uses `box_threshold`.
+    Try threshold → box_threshold → score_threshold.
+    """
+    try:
+        res = processor.post_process_grounded_object_detection(
+            outputs=outputs, input_ids=input_ids,
+            threshold=box_threshold, text_threshold=text_threshold,
+            target_sizes=target_sizes
+        )
+        return res[0]
+    except TypeError:
+        pass
+    try:
+        res = processor.post_process_grounded_object_detection(
+            outputs=outputs, input_ids=input_ids,
+            box_threshold=box_threshold, text_threshold=text_threshold,
+            target_sizes=target_sizes
+        )
+        return res[0]
+    except TypeError:
+        pass
+    res = processor.post_process_grounded_object_detection(
+        outputs=outputs, input_ids=input_ids,
+        score_threshold=box_threshold, text_threshold=text_threshold,
+        target_sizes=target_sizes
+    )
+    return res[0]
+
+
+# ==============================
+# Geometry helpers (IoU, center)
+# ==============================
+def iou_xyxy(a: List[float], b: List[float]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    aw, ah = max(0.0, ax2 - ax1), max(0.0, ay2 - ay1)
+    bw, bh = max(0.0, bx2 - bx1), max(0.0, by2 - by1)
+    union = aw * ah + bw * bh - inter + 1e-9
+    return inter / union
+
+def center_in_box(box: List[float], region: List[float]) -> bool:
+    x1, y1, x2, y2 = box
+    cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
+    rx1, ry1, rx2, ry2 = region
+    return (rx1 <= cx <= rx2) and (ry1 <= cy <= ry2)
+
+def expand_box(box: List[float], W: int, H: int, pad: float) -> List[float]:
+    x1, y1, x2, y2 = box
+    dx = pad * min(W, H)
+    dy = dx
+    return [max(0.0, x1 - dx), max(0.0, y1 - dy), min(W - 1.0, x2 + dx), min(H - 1.0, y2 + dy)]
+
+
+# ==============================
+# GroundingDINO wrapper (HF)
+# ==============================
+class HFGroundedDINO:
+    """Processor + GroundingDinoForObjectDetection wrapper."""
+    def __init__(self, model_id: str = "IDEA-Research/grounding-dino-base", device: Optional[str] = None):
+        if not TRANSFORMERS_AVAILABLE:
+            raise RuntimeError("transformers is not installed.")
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"🔧 Initializing GroundingDINO on device: {self.device}")
+        self.processor = _load_grounding_processor(model_id)
+        self.model = GroundingDinoForObjectDetection.from_pretrained(model_id).to(self.device)
+        print("✅ GroundingDINO initialized.")
+
+    @torch.inference_mode()
+    def detect(self, image: Image.Image, labels: List[str],
+               box_threshold: float = BOX_THRESHOLD, text_threshold: float = TEXT_THRESHOLD) -> List[Dict[str, Any]]:
+        if len(labels) == 0:
+            return []
+        text = ". ".join([f"a {l}" for l in labels]) + "."
+        inputs = self.processor(images=image, text=text, return_tensors="pt").to(self.device)
+        outputs = self.model(**inputs)
+        target_sizes = [image.size[::-1]]
+        result = _post_process_compat(self.processor, outputs, inputs.input_ids, target_sizes, box_threshold, text_threshold)
+
+        # Robust label extraction: prefer text_labels (>=4.51), fallback to labels
+        label_list = result.get("text_labels", result.get("labels", []))
+
+        dets: List[Dict[str, Any]] = []
+        for box, score, lab in zip(result["boxes"], result["scores"], label_list):
+            x_min, y_min, x_max, y_max = [float(x) for x in box.tolist()]
+            lab = lab if isinstance(lab, str) else str(lab)
+            dets.append({"box": [x_min, y_min, x_max, y_max], "score": float(score), "label": lab})
+        return dets
+
+
+# ==============================
+# Context exclusions: windows/doors
+# ==============================
+def get_exclusion_boxes(detector: Optional[HFGroundedDINO], image: Image.Image) -> List[List[float]]:
+    """Detect windows/doors and return padded exclusion boxes."""
+    if detector is None:
+        return []
+    W, H = image.size
+    dets = detector.detect(image, CONTEXT_EXCLUDE_LABELS, box_threshold=EXCLUSION_BOX_TH, text_threshold=EXCLUSION_TEXT_TH)
+    boxes = []
+    for d in dets:
+        boxes.append(expand_box(d["box"], W, H, EXCLUSION_PAD_RATIO))
+    if boxes:
+        print(f"🚧 Exclusion zones (windows/doors): {len(boxes)}")
+    return boxes
+
+def overlaps_exclusions(label: str, box: List[float], exclusions: List[List[float]]) -> bool:
+    """Return True if box should be dropped due to exclusion overlap."""
+    if not exclusions:
+        return False
+    iou_thr = EXCLUSION_IOU_PLANT if label == "plant" else EXCLUSION_IOU
+    for ex in exclusions:
+        if iou_xyxy(box, ex) >= iou_thr:
+            return True
+        if EXCLUSION_CENTER_RULE and center_in_box(box, ex):
+            return True
+    return False
+
+
+# ==============================
+# Candidate filtering using detector (score + area + exclusions)
+# ==============================
+def _valid_by_area(box: List[float], img_area: float,
+                   min_ratio: float = MIN_AREA_RATIO, max_ratio: float = MAX_AREA_RATIO) -> bool:
+    x1, y1, x2, y2 = box
+    area = max(0.0, (x2 - x1)) * max(0.0, (y2 - y1))
+    ratio = area / img_area if img_area > 0 else 0.0
+    return (min_ratio <= ratio <= max_ratio)
+
+def filter_candidates_with_detector(
+    detector: Optional[HFGroundedDINO],
+    image: Image.Image,
+    candidates: List[str],
+    exclusions: Optional[List[List[float]]] = None,
+    min_area_ratio: float = MIN_AREA_RATIO,
+    max_area_ratio: float = MAX_AREA_RATIO,
+    top_k: int = MAX_PROMPTS,
+    box_th: float = BOX_THRESHOLD,
+    text_th: float = TEXT_THRESHOLD,
+) -> List[str]:
+    """Keep labels that produce at least one good detection (score + area) not overlapping exclusions."""
+    if detector is None or len(candidates) == 0:
+        return candidates[:top_k]
+
+    W, H = image.size
+    img_area = float(W * H)
+    ranked: List[Tuple[str, float]] = []
+
+    for label in candidates:
+        dets = detector.detect(image, [label], box_threshold=box_th, text_threshold=text_th)
+        if len(dets) == 0:
+            continue
+        best = 0.0
+        valid_any = False
+        for d in dets:
+            box = d["box"]
+            if exclusions and overlaps_exclusions(label, box, exclusions):
+                continue
+            if _valid_by_area(box, img_area, min_area_ratio, max_area_ratio):
+                valid_any = True
+                best = max(best, d["score"])
+        if valid_any:
+            ranked.append((label, best))
+
+    ranked.sort(key=lambda t: t[1], reverse=True)
+    return [lab for lab, _ in ranked[:top_k]]
+
+
+def select_labels_for_segmentation(
+    detector: Optional[HFGroundedDINO],
+    image: Image.Image,
+    gpt_raw: List[str],
+    exclusions: Optional[List[List[float]]] = None,
+) -> List[str]:
+    """
+    Ensure ≥1 label while being conservative w.r.t. windows/doors.
+    1) GPT → normalized → filtered by detector + exclusions.
+    2) If empty, try preferred labels with current thresholds.
+    3) If still empty, relax thresholds once.
+    4) If still empty, fallback to ["sofa"].
+    """
+    # Step 1
+    labels = normalize_and_filter_labels(gpt_raw)
+    labels = filter_candidates_with_detector(detector, image, labels, exclusions=exclusions, top_k=MAX_PROMPTS)
+    if labels:
+        return labels
+
+    # Step 2
+    priors = normalize_and_filter_labels(PREFERRED_ORDER)
+    labels = filter_candidates_with_detector(detector, image, priors, exclusions=exclusions, top_k=1)
+    if labels:
+        return labels
+
+    # Step 3 (relax)
+    labels = filter_candidates_with_detector(
+        detector, image, priors, exclusions=exclusions, top_k=1,
+        box_th=max(0.15, BOX_THRESHOLD - 0.15),
+        text_th=max(0.15, TEXT_THRESHOLD - 0.10),
+        min_area_ratio=max(0.005, MIN_AREA_RATIO / 2.0),
+        max_area_ratio=min(0.50, MAX_AREA_RATIO * 1.5),
+    )
+    if labels:
+        return labels
+
+    # Step 4
+    return ["sofa"]
+
+
+# ==============================
+# GroundedSAM Pipeline
+# ==============================
+class GroundedSAMPipeline:
+    """GroundingDINO detection → SAM segmentation → save masks & JSON."""
     def __init__(self, sam_checkpoint: str, output_dir: str):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.sam_predictor = None
-        self.grounding_detector = None
         self.output_dir = output_dir
+        self.sam_predictor: Optional[SamPredictor] = None
+        self.grounding: Optional[HFGroundedDINO] = None
 
         os.makedirs(os.path.join(self.output_dir, "masks"), exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, "visualizations"), exist_ok=True)
@@ -79,124 +424,207 @@ class HuggingFaceGroundedSAM:
             self._init_sam(sam_checkpoint)
         if TRANSFORMERS_AVAILABLE:
             self._init_grounding_detector()
+        else:
+            print("❌ transformers not available; detection will be skipped.")
 
     def _init_sam(self, checkpoint_path: str):
         try:
-            print("🔧 Initializing SAM model...")
+            print("🔧 Initializing SAM...")
             sam = sam_model_registry["vit_h"](checkpoint=checkpoint_path)
             sam.to(self.device)
             self.sam_predictor = SamPredictor(sam)
-            print(f"✅ SAM initialized successfully (Device: {self.device})")
+            print(f"✅ SAM initialized (device: {self.device})")
         except Exception as e:
             print(f"❌ Failed to initialize SAM: {e}")
 
     def _init_grounding_detector(self):
         try:
-            print("🔧 Initializing Hugging Face GroundingDINO model...")
-            self.grounding_detector = pipeline(
-                "zero-shot-object-detection",
-                model="IDEA-Research/grounding-dino-base",
-                device=0 if self.device == "cuda" else -1
-            )
-            print("✅ GroundingDINO initialized successfully.")
+            self.grounding = HFGroundedDINO(model_id="IDEA-Research/grounding-dino-base", device=self.device)
         except Exception as e:
             print(f"❌ Failed to initialize GroundingDINO: {e}")
-            
-    def detect_with_text(self, image: Image.Image, text_prompt: str, threshold: float) -> List[Dict]:
-        if not self.grounding_detector:
-            print("❌ Grounding detector not initialized.")
-            return []
-        
-        print(f"🧠 Detecting objects for prompt: '{text_prompt}'")
-        predictions = self.grounding_detector(image, candidate_labels=[text_prompt])
-        filtered = [p for p in predictions if p.get('score', 0) >= threshold]
-        print(f"  > Found {len(filtered)} instances with confidence > {threshold}.")
-        return filtered
+            self.grounding = None
 
-    def segment_with_sam(self, image_rgb: np.ndarray, boxes: List[np.ndarray]) -> List[np.ndarray]:
-        if not self.sam_predictor:
+    def segment_with_sam(self, image_rgb: np.ndarray, boxes_xyxy: List[List[float]]) -> List[np.ndarray]:
+        """Segment each box with SAM; returns 0/1 masks."""
+        if self.sam_predictor is None:
             print("❌ SAM not initialized.")
             return []
-        
         self.sam_predictor.set_image(image_rgb)
-        all_masks = []
-        for box in boxes:
-            masks, scores, _ = self.sam_predictor.predict(box=box, multimask_output=True)
+        masks_out: List[np.ndarray] = []
+        for box in boxes_xyxy:
+            box_np = np.array(box, dtype=np.float32)
+            masks, scores, _ = self.sam_predictor.predict(box=box_np, multimask_output=True)
             best_mask = masks[np.argmax(scores)]
-            all_masks.append(best_mask)
-        return all_masks
-
-    def save_and_visualize(self, image_path: str, all_results: Dict):
-        image_bgr = cv2.imread(image_path)
-        vis_image = image_bgr.copy()
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255)]
-        
-        for i, (prompt, results) in enumerate(all_results.items()):
-            if not results: continue
-            
-            color = colors[i % len(colors)]
-            combined_mask_for_prompt = np.zeros_like(results[0]['mask'], dtype=np.uint8)
-            
-            for result in results:
-                mask = result['mask'].astype(np.uint8)
-                combined_mask_for_prompt = np.maximum(combined_mask_for_prompt, mask)
-                
-                # Visualization logic
-                overlay = np.zeros_like(vis_image)
-                overlay[mask > 0] = color
-                vis_image = cv2.addWeighted(vis_image, 1.0, overlay, 0.5, 0)
-            
-            mask_filename = f"{prompt.replace(' ', '_')}.png"
-            cv2.imwrite(os.path.join(self.output_dir, "masks", mask_filename), combined_mask_for_prompt * 255)
-        
-        vis_filename = os.path.basename(image_path).replace('.png', '_visualization.png')
-        vis_path = os.path.join(self.output_dir, "visualizations", vis_filename)
-        cv2.imwrite(vis_path, vis_image)
-        print(f"✅ Visualization saved to: {vis_path}")
+            masks_out.append(best_mask.astype(np.uint8))
+        return masks_out
 
 
+# ==============================
+# Entrypoint
+# ==============================
 def main(args):
     print("🚀 Starting Panorama Segmentation Pipeline")
     print("=" * 60)
 
-    prompts_to_run = get_asset_prompts_from_gpt(args.panorama_path, args.openai_api_key)
-    if not prompts_to_run:
-        print("❌ No prompts generated. Using default fallback prompts.")
-        prompts_to_run = ["sofa", "chair", "table", "plant", "lamp", "car", "tree", "bench"]
-
-    grounded_sam = HuggingFaceGroundedSAM(args.sam_checkpoint, args.output_dir)
-
+    # Load image
     try:
         panorama_pil = Image.open(args.panorama_path).convert("RGB")
     except FileNotFoundError:
         print(f"❌ Panorama image not found at: {args.panorama_path}")
         return
+    image_rgb = np.array(panorama_pil)
 
-    all_results = {}
-    for prompt in prompts_to_run:
-        detections = grounded_sam.detect_with_text(panorama_pil, prompt, threshold=0.3)
-        if not detections:
-            all_results[prompt] = []
-            continue
-        
-        boxes = [np.array([d['box']['xmin'], d['box']['ymin'], d['box']['xmax'], d['box']['ymax']]) for d in detections]
-        masks = grounded_sam.segment_with_sam(np.array(panorama_pil), boxes)
-        
-        results_for_prompt = [{"mask": mask} for mask in masks]
-        all_results[prompt] = results_for_prompt
+    # Init pipeline
+    pipeline = GroundedSAMPipeline(args.sam_checkpoint, args.output_dir)
 
-    grounded_sam.save_and_visualize(args.panorama_path, all_results)
-    
+    # Detect exclusion zones first (windows/doors)
+    exclusions = get_exclusion_boxes(pipeline.grounding, panorama_pil)
+
+    # GPT → label selection with ≥1 guarantee (considering exclusions)
+    raw_labels = get_asset_prompts_from_gpt(args.panorama_path, args.openai_api_key)
+    final_labels = select_labels_for_segmentation(pipeline.grounding, panorama_pil, raw_labels, exclusions=exclusions)
+    print(f"🎯 Final labels to try: {final_labels}")
+
+    # Detect → cross-label NMS → segment
+    all_results: Dict[str, List[Dict[str, Any]]] = {}
+    kept_boxes: List[List[float]] = []  # for cross-label NMS across prompts
+
+    W, H = panorama_pil.size
+    img_area = float(W * H)
+
+    for prompt in final_labels:
+        dets = pipeline.grounding.detect(
+            panorama_pil, [prompt],
+            box_threshold=BOX_THRESHOLD, text_threshold=TEXT_THRESHOLD
+        ) if pipeline.grounding else []
+
+        rej_area = rej_excl = rej_nms = 0
+        good: List[Dict[str, Any]] = []
+
+        # Area & exclusion filters
+        for d in dets:
+            box = d["box"]
+            if exclusions and overlaps_exclusions(prompt, box, exclusions):
+                rej_excl += 1
+                continue
+            area_ratio = ((box[2]-box[0])*(box[3]-box[1]))/img_area
+            if not (MIN_AREA_RATIO <= area_ratio <= MAX_AREA_RATIO):
+                rej_area += 1
+                continue
+            good.append(d)
+
+        # Cross-label NMS
+        deduped: List[Dict[str, Any]] = []
+        for d in good:
+            if any(iou_xyxy(d["box"], kb) >= CROSS_LABEL_NMS_IOU for kb in kept_boxes):
+                rej_nms += 1
+                continue
+            deduped.append(d)
+            kept_boxes.append(d["box"])
+
+        # Print per-label ONLY if something will be segmented
+        if len(deduped) > 0:
+            print(f"🧩 {prompt}: kept={len(deduped)}")
+
+        if len(deduped) == 0:
+            continue  # ← do not create empty entry at all
+
+        # Segment with SAM
+        boxes = [d["box"] for d in deduped]
+        masks = pipeline.segment_with_sam(image_rgb, boxes)
+
+        merged = []
+        for d, m in zip(deduped, masks):
+            merged.append({
+                "label": prompt,
+                "score": d["score"],
+                "box": d["box"],
+                "mask": m
+            })
+        all_results[prompt] = merged
+
+    # Final summary: ONLY successful labels
+    segmented_counts = {k: len(v) for k, v in all_results.items() if len(v) > 0}
+    if segmented_counts:
+        pretty = ", ".join([f"{k} x{c}" for k, c in segmented_counts.items()])
+        print(f"🏁 Segmented assets: {pretty}")
+    else:
+        print("⚠️ No assets segmented.")
+
+    # Save visualization & JSON summary with ONLY successful labels
+    image_bgr = cv2.imread(args.panorama_path)
+    if image_bgr is None:
+        print("❌ Failed to load image for visualization.")
+        return
+
+    vis_image = image_bgr.copy()
+    colors = [
+        (255, 0, 0), (0, 255, 0), (0, 0, 255),
+        (255, 255, 0), (255, 0, 255), (0, 255, 255),
+        (128, 64, 0), (0, 128, 255), (128, 0, 128)
+    ]
+    summary = {"image": os.path.basename(args.panorama_path), "prompts": {}}
+    color_idx = 0
+
+    for prompt, dets in all_results.items():
+        if len(dets) == 0:
+            continue  # ← skip empty labels entirely
+
+        color = colors[color_idx % len(colors)]
+        color_idx += 1
+
+        H, W = vis_image.shape[:2]
+        combined_mask = np.zeros((H, W), dtype=np.uint8)
+        json_items = []
+
+        for d in dets:
+            mask = d["mask"].astype(np.uint8)
+            combined_mask = np.maximum(combined_mask, mask)
+
+            item = {
+                "label": d.get("label", prompt),
+                "score": float(d.get("score", 0.0)),
+                "box": d.get("box", None),
+                "mask_saved_as": None
+            }
+            json_items.append(item)
+
+            overlay = np.zeros_like(vis_image)
+            overlay[mask > 0] = color
+            vis_image = cv2.addWeighted(vis_image, 1.0, overlay, 0.45, 0)
+
+        prompt_fname = f"{prompt.replace(' ', '_')}.png"
+        mask_path = os.path.join(args.output_dir, "masks", prompt_fname)
+        os.makedirs(os.path.dirname(mask_path), exist_ok=True)
+        cv2.imwrite(mask_path, combined_mask * 255)
+
+        for it in json_items:
+            it["mask_saved_as"] = os.path.relpath(mask_path, args.output_dir)
+
+        summary["prompts"][prompt] = json_items
+
+    base = os.path.splitext(os.path.basename(args.panorama_path))[0]
+    vis_path = os.path.join(args.output_dir, "visualizations", f"{base}_visualization.png")
+    os.makedirs(os.path.dirname(vis_path), exist_ok=True)
+    cv2.imwrite(vis_path, vis_image)
+    summary["visualization"] = os.path.relpath(vis_path, args.output_dir)
+
+    # Keep filename stable; content includes only successful labels
+    json_path = os.path.join(args.output_dir, "results.json")
+    with open(json_path, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"✅ Visualization saved to: {vis_path}")
+    print(f"✅ JSON summary saved to: {json_path}")
     print("=" * 60)
     print("🎉 Pipeline Finished Successfully!")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Segment panoramas using GPT-4V and GroundedSAM.")
+    parser = argparse.ArgumentParser(description="Conservative panorama segmentation for VR assets (success-only output).")
     parser.add_argument("--sam_checkpoint", type=str, required=True, help="Path to the SAM checkpoint file.")
     parser.add_argument("--panorama_path", type=str, required=True, help="Path to the panorama image to process.")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save the results.")
-    parser.add_argument("--openai_api_key", type=str, default=os.getenv("OPENAI_API_KEY"), help="OpenAI API key. Can also be set as an environment variable.")
-    
+    parser.add_argument("--openai_api_key", type=str, default=os.getenv("OPENAI_API_KEY"), help="OpenAI API key.")
     args = parser.parse_args()
     main(args)

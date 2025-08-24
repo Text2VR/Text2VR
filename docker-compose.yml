@@ -15,6 +15,9 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    environment:
+      # Pass the API key from the host shell environment to the container
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - ./output:/workspace/DreamScene360/output
       - ./pre_checkpoints:/workspace/DreamScene360/pre_checkpoints
@@ -43,3 +46,4 @@ services:
       - ./pre_checkpoints:/app/checkpoints
       # Mount the data folder from the dreamscene360 service to read the panorama
       - ./dreamscene360_service/data:/app/data
+      - ./segmentation_service/segment_panorama.py:/app/segment_panorama.py:ro

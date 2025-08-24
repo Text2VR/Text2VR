@@ -64,7 +64,7 @@ Text2VR/
     └── omnidata_dpt_depth_v2.ckpt      # <-- Pretrained models will be placed here
     └── monidata_dpt_normal_v2.ckpt     # <-- Pretrained models will be placed here
     └── monidata_dpt_normal_v2.ckpt     # <-- Pretrained models will be placed here
-    └──
+    └── sam_vit_h_4b8939.pth            # <-- Pretrained models will be placed here
     └──
 ```
 

@@ -4,8 +4,9 @@
 set -e
 
 # --- CONFIGURATION ---
-# ★★★ IMPORTANT: Set your OpenAI API key here ★★★
-export OPENAI_API_KEY="your_openai_api_key_here"
+# The OpenAI API key is now automatically loaded from the .env file by Docker Compose.
+# Make sure your .env file exists in the root directory and contains:
+# OPENAI_API_KEY="sk-..."
 
 # Define the scene name and prompt
 SCENE_NAME="indoor_livingroom"
@@ -28,6 +29,7 @@ echo "======================================================"
 echo "    STARTING END-TO-END TEXT2VR PIPELINE"
 echo "======================================================"
 echo "Scene: ${SCENE_NAME}"
+echo "NOTE: OpenAI API Key will be loaded from your .env file."
 echo ""
 
 # Step 1: Build all services defined in docker-compose.yml
@@ -40,7 +42,7 @@ echo -e "\n--> STAGE 1: Generating Panorama via [dreamscene360] service..."
 mkdir -p ${HOST_PANO_DATA_DIR}
 echo "${PANO_PROMPT}" > "${HOST_PANO_DATA_DIR}/${SCENE_NAME}_PROMPT.txt"
 
-# Run the training script for 1 iteration to generate the panorama
+# Run the training script. The API key is passed automatically by docker-compose.
 docker-compose run --rm dreamscene360 python train.py \
     -s ${CONTAINER_DS360_DATA_DIR} \
     -m ${CONTAINER_DS360_OUTPUT_DIR} \
@@ -57,6 +59,7 @@ echo "✅ STAGE 1 Complete: Panorama generated."
 
 # Step 3: Segment the panorama using the 'segmentation' service
 echo -e "\n--> STAGE 2: Segmenting Panorama via [segmentation] service..."
+# The API key is passed automatically by docker-compose from the .env file.
 docker-compose run --rm segmentation python segment_panorama.py \
     --panorama_path ${CONTAINER_SEG_PANO_PATH} \
     --output_dir ${CONTAINER_SEG_OUTPUT_DIR} \

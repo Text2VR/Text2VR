@@ -46,6 +46,23 @@ python download_lora.py
 cd ..
 ```
 
+**Result:**
+```bash
+/workspace/dreamscene360_service
+├── pre_checkpoints/
+│    └── big-lama.ckpt                   
+│    └── omnidata_dpt_depth_v2.ckpt      
+│    └── monidata_dpt_normal_v2.ckpt     
+│    └── ...
+├── stitch_diffusion/
+│   └── pretrained_model/
+│       ├── v2-1_512-ema-pruned.safetensors
+│       └── vae-ft-mse-840000-ema-pruned.ckpt
+│   └── download_lora.py → LoRA models (installed)
+└── ...
+```
+
+
 #### 3.2. How to Run train.py Manually
 **Step 1: Create a Prompt File**
 The script reads the scene prompt from a text file. You need to create this file first.
@@ -60,6 +77,16 @@ echo "A 360 equirectangular photo of a minimalist and spacious living room. In t
 mkdir -p outdoor_park
 echo "A large urban park with lush green grass and tall trees surrounding a central fountain, distant city skyscrapers visible on the skyline, bright midday sunlight, gentle breeze rustling leaves, with children playing near the fountain, creating a refreshing and lively scene." \
   > outdoor_park/outdoor_park_PROMPT.txt
+```
+**Result:**
+```bash
+/workspace/dreamscene360_service
+├── data/
+│   ├── indoor_livingroom/
+│   │   └── indoor_livingroom_PROMPT.txt
+│   └── outdoor_park/
+│       └── outdoor_park_PROMPT.txt
+└── ...
 ```
 
 **Step 2: Run Training**

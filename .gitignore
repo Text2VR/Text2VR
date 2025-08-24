@@ -58,3 +58,6 @@ assets/large_files/
 # OS generated files
 Thumbs.db
 ehthumbs.db
+
+# Ignore local environment variables file
+.env
