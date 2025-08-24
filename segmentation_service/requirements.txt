@@ -1,0 +1,16 @@
+# For Hugging Face models
+transformers>=4.39.0
+tokenizers>=0.15.0
+huggingface_hub>=0.22.0
+accelerate>=0.25.0
+
+# For SAM
+git+https://github.com/facebookresearch/segment-anything.git
+
+# Core libraries
+torch
+torchvision
+Pillow
+numpy
+opencv-python
+requests

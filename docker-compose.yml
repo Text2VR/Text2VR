@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Service for running the original DreamScene360 training
+  dreamscene360:
+    build:
+      context: ./dreamscene360_service
+      dockerfile: Dockerfile
+    container_name: dreamscene360_service_container
+    ipc: host # Shared memory for multiprocessing
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./output:/workspace/DreamScene360/output
+      - ./pre_checkpoints:/workspace/DreamScene360/pre_checkpoints
+      - ./dreamscene360_service:/workspace/DreamScene360
+    working_dir: /workspace/DreamScene360
+
+  # Service for running the new panorama segmentation pipeline
+  segmentation:
+    build:
+      context: ./segmentation_service
+      dockerfile: Dockerfile
+    container_name: segmentation_service_container
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      # Pass the API key from the host shell environment to the container
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      # Mount shared folders
+      - ./output:/app/output
+      - ./pre_checkpoints:/app/checkpoints
+      # Mount the data folder from the dreamscene360 service to read the panorama
+      - ./dreamscene360_service/data:/app/data
