@@ -1,0 +1,16 @@
+# --- HF / GroundingDINO ---
+transformers==4.55.2
+tokenizers==0.21.4
+huggingface_hub==0.34.4
+timm==0.9.12
+safetensors==0.5.3
+accelerate==1.10.0   # Torch 2.4에서 OK
+
+# --- Core ---
+numpy==1.26.4
+Pillow==10.0.0
+opencv-python-headless==4.11.0.86
+requests==2.32.4
+
+# --- SAM ---
+git+https://github.com/facebookresearch/segment-anything.git

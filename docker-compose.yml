@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # Service for running the original DreamScene360 training
+  dreamscene360:
+    build:
+      context: ./DREAMSCENE360
+      dockerfile: Dockerfile
+    container_name: text2vr_dreamscene360
+    working_dir: /workspace/DREAMSCENE360
+    environment:
+      # Pass the API key from the host shell environment to the container
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1            
+              capabilities: [gpu]
+    volumes:
+      # DreamScene360 code + outputs + checkpoints
+      - ./DREAMSCENE360:/workspace/DREAMSCENE360
+      - ./output:/workspace/DREAMSCENE360/output
+      - ./pre_checkpoints:/workspace/DREAMSCENE360/pre_checkpoints
+
+  # Service for running the new panorama segmentation pipelin
+  asset_seg:
+    build:
+      context: ./ASSET_SEG
+      dockerfile: Dockerfile
+    container_name: text2vr_asset_seg
+    working_dir: /app
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - DIFFUSERS_CACHE=/root/.cache/huggingface/diffusers
+      - TORCH_HOME=/root/.cache/torch
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1            
+              capabilities: [gpu]
+    volumes:
+      # share outputs, checkpoints, and the panorama data folder
+      - ./output:/app/output
+      - ./pre_checkpoints:/app/checkpoints
+      - ./DREAMSCENE360/data:/app/data
+      - ./ASSET_SEG/segment_panorama.py:/app/segment_panorama.py:ro
+      - ./cache/hf:/root/.cache/huggingface
+      - ./cache/torch:/root/.cache/torch
+
+  # Service for running the background inpainting pipeline
+  bg_inpaint:
+      build:
+        context: ./BG_INPAINT
+        dockerfile: Dockerfile
+      container_name: text2vr_bg_inpaint
+      working_dir: /workspace
+      environment:
+        - HF_HOME=/workspace/.cache/huggingface
+        - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+        - NVIDIA_VISIBLE_DEVICES=all
+        - HF_HOME=/root/.cache/huggingface
+        - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+        - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+        - DIFFUSERS_CACHE=/root/.cache/huggingface/diffusers
+        - TORCH_HOME=/root/.cache/torch
+      ipc: host
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: 1            
+                capabilities: [gpu]
+      volumes:
+        - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
+        - ./DREAMSCENE360/data:/workspace/data
+        - ./output:/workspace/output
+        - ./cache/hf:/root/.cache/huggingface
+        - ./cache/torch:/root/.cache/torch
