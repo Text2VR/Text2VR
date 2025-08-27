@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Conservative panorama segmentation for VR assets:
-- Use GPT to propose candidate object labels from a whitelisted vocabulary.
-- Use GroundingDINO for text-conditioned detection with conservative filters.
-- Use SAM to segment final kept boxes.
-- Print and save ONLY the labels that produced at least one final mask.
+Indoor-first panorama segmentation for VR assets.
+
+Pipeline:
+- (Optionally) ask GPT to propose candidate asset labels from a whitelisted vocabulary.
+- Use GroundingDINO for text-conditioned object detection.
+- Use SAM to segment final masks for kept boxes.
+- Build a window/door "exclusion mask" and drop candidates that significantly overlap it.
+  (This aims to avoid outdoor objects while keeping indoor items near windows.)
+- Only output/save labels that actually produced at least one final mask.
 """
 
-import os
-import cv2
-import json
-import base64
-import torch
+import os, cv2, json, base64, argparse, requests
 import numpy as np
-import argparse
-import requests
-from PIL import Image
 from typing import List, Dict, Any, Tuple, Optional
+from PIL import Image
+import torch
 
 # ==============================
 # Optional dependency guards
 # ==============================
 try:
+    # SAM for segmentation
     from segment_anything import sam_model_registry, SamPredictor
     SAM_AVAILABLE = True
 except Exception as e:
@@ -31,7 +31,7 @@ except Exception as e:
 
 TRANSFORMERS_AVAILABLE = True
 try:
-    # Use the model-specific class to avoid Auto* → generation → accelerate chain
+    # Use the specific GroundingDINO class to avoid Auto* → generation → accelerate chain
     from transformers import GroundingDinoForObjectDetection
 except Exception as e:
     print("⚠️ transformers import failed:", repr(e))
@@ -51,9 +51,9 @@ ALLOWED_LABELS = {
     "cabinet", "shelf", "bookshelf", "tv", "television",
 }
 BLACKLIST_LABELS = {
-    # background-like
+    # background-like categories we don't segment as assets
     "door", "window", "wall", "floor", "ceiling", "sky", "balcony", "frame", "stairs",
-    # too amorphous
+    # too amorphous for stable interaction
     "shadow", "light", "reflection", "curtain"
 }
 SYNONYMS = {
@@ -64,39 +64,45 @@ SYNONYMS = {
 }
 DEFAULT_FALLBACK = ["sofa", "chair", "table", "plant", "lamp", "bench"]
 
-# Selection / filtering hyper-params
+# Default thresholds (can be overridden via CLI)
 MIN_PROMPTS = 1
 MAX_PROMPTS = 3
 BOX_THRESHOLD = 0.30
 TEXT_THRESHOLD = 0.25
-MIN_AREA_RATIO = 0.01      # at least 1% of image
-MAX_AREA_RATIO = 0.30      # at most 30% of image
+MIN_AREA_RATIO = 0.01      # keep boxes covering at least 1% of the image
+MAX_AREA_RATIO = 0.30      # and at most 30% of the image
 
-# Priority order to ensure ≥1 object
+# Priority order to ensure at least one object remains
 PREFERRED_ORDER = [
     "sofa", "couch", "armchair", "chair", "bench", "stool",
     "table", "coffee table", "side table",
     "plant", "lamp", "floor lamp", "tv", "cabinet", "bookshelf"
 ]
 
-# Conservative filtering against windows/doors (context)
-CONTEXT_EXCLUDE_LABELS = ["window", "door"]   # used only for exclusion, never as assets
+# Context exclusions (windows/doors) → mask-first policy
+CONTEXT_EXCLUDE_LABELS = ["window", "door"]
 EXCLUSION_BOX_TH = 0.25
 EXCLUSION_TEXT_TH = 0.25
-EXCLUSION_PAD_RATIO = 0.02    # expand exclusion boxes by 2% of min(W,H)
-EXCLUSION_IOU = 0.20          # if IoU with exclusion > 0.20 -> drop
-EXCLUSION_IOU_PLANT = 0.10    # plants are stricter
-EXCLUSION_CENTER_RULE = True  # also drop if center lies inside exclusion
+EXCLUSION_PAD_RATIO = 0.01     # padding for fallback box-only exclusions
+EXCLUSION_CENTER_RULE = True   # additional conservative rule if mask is unavailable
 
-# Cross-label NMS to avoid duplicate assets (e.g., armchair vs. sofa of same object)
+# Mask-based indoor/outdoor split (preferred)
+EXCLUSION_USE_MASK = True
+EXCLUSION_MASK_DILATE_PX = 12      # dilation (px) applied to union of window/door masks
+EXCLUSION_OVERLAP_DROP = 0.40      # drop if (exclusion-mask coverage within candidate box) ≥ this
+
+# Cross-label NMS to avoid duplicates across semantically-close labels
 CROSS_LABEL_NMS_IOU = 0.60
 
 
 # ==============================
 # OpenAI Vision (GPT-4o family)
 # ==============================
-def get_asset_prompts_from_gpt(image_path: str, api_key: str) -> List[str]:
-    """Ask GPT-4o to return asset-like nouns from a constrained vocabulary."""
+def get_asset_prompts_from_gpt(image_path: str, api_key: str, override_labels: Optional[List[str]] = None) -> List[str]:
+    """Return asset-like nouns from a constrained vocabulary via GPT-4o, or use overrides."""
+    if override_labels:
+        print(f"🔖 Using overridden labels: {override_labels}")
+        return [s.strip().lower() for s in override_labels if s.strip()]
     print("🧠 Contacting GPT-4o to analyze the panorama and identify assets...")
     if not api_key or api_key == "your_openai_api_key_here":
         print("❌ ERROR: OpenAI API key is not provided or is a placeholder.")
@@ -151,7 +157,7 @@ def get_asset_prompts_from_gpt(image_path: str, api_key: str) -> List[str]:
 # Label post-processing
 # ==============================
 def normalize_and_filter_labels(labels: List[str]) -> List[str]:
-    """Normalize synonyms, apply whitelist/blacklist, deduplicate."""
+    """Normalize synonyms, apply whitelist/blacklist, and deduplicate."""
     out: List[str] = []
     for lab in labels:
         lab = SYNONYMS.get(lab.strip().lower(), lab.strip().lower())
@@ -194,17 +200,13 @@ def _load_grounding_processor(model_id: str):
 
 def _post_process_compat(processor, outputs, input_ids, target_sizes,
                          box_threshold: float, text_threshold: float):
-    """
-    Transformers >=4.55 uses `threshold`; older uses `box_threshold`.
-    Try threshold → box_threshold → score_threshold.
-    """
+    """Call the appropriate post-processing API across Transformers versions."""
     try:
         res = processor.post_process_grounded_object_detection(
             outputs=outputs, input_ids=input_ids,
             threshold=box_threshold, text_threshold=text_threshold,
             target_sizes=target_sizes
-        )
-        return res[0]
+        ); return res[0]
     except TypeError:
         pass
     try:
@@ -212,22 +214,21 @@ def _post_process_compat(processor, outputs, input_ids, target_sizes,
             outputs=outputs, input_ids=input_ids,
             box_threshold=box_threshold, text_threshold=text_threshold,
             target_sizes=target_sizes
-        )
-        return res[0]
+        ); return res[0]
     except TypeError:
         pass
     res = processor.post_process_grounded_object_detection(
         outputs=outputs, input_ids=input_ids,
         score_threshold=box_threshold, text_threshold=text_threshold,
         target_sizes=target_sizes
-    )
-    return res[0]
+    ); return res[0]
 
 
 # ==============================
-# Geometry helpers (IoU, center)
+# Geometry helpers
 # ==============================
 def iou_xyxy(a: List[float], b: List[float]) -> float:
+    """IoU for [x1,y1,x2,y2] boxes."""
     ax1, ay1, ax2, ay2 = a
     bx1, by1, bx2, by2 = b
     ix1, iy1 = max(ax1, bx1), max(ay1, by1)
@@ -240,12 +241,14 @@ def iou_xyxy(a: List[float], b: List[float]) -> float:
     return inter / union
 
 def center_in_box(box: List[float], region: List[float]) -> bool:
+    """Return True if the center of `box` lies inside `region`."""
     x1, y1, x2, y2 = box
     cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
     rx1, ry1, rx2, ry2 = region
     return (rx1 <= cx <= rx2) and (ry1 <= cy <= ry2)
 
 def expand_box(box: List[float], W: int, H: int, pad: float) -> List[float]:
+    """Expand the box by a fraction of min(W,H)."""
     x1, y1, x2, y2 = box
     dx = pad * min(W, H)
     dy = dx
@@ -256,7 +259,7 @@ def expand_box(box: List[float], W: int, H: int, pad: float) -> List[float]:
 # GroundingDINO wrapper (HF)
 # ==============================
 class HFGroundedDINO:
-    """Processor + GroundingDinoForObjectDetection wrapper."""
+    """Thin wrapper around GroundingDinoForObjectDetection + processor."""
     def __init__(self, model_id: str = "IDEA-Research/grounding-dino-base", device: Optional[str] = None):
         if not TRANSFORMERS_AVAILABLE:
             raise RuntimeError("transformers is not installed.")
@@ -268,7 +271,8 @@ class HFGroundedDINO:
 
     @torch.inference_mode()
     def detect(self, image: Image.Image, labels: List[str],
-               box_threshold: float = BOX_THRESHOLD, text_threshold: float = TEXT_THRESHOLD) -> List[Dict[str, Any]]:
+               box_threshold: float, text_threshold: float) -> List[Dict[str, Any]]:
+        """Run text-conditioned detection for a list of labels."""
         if len(labels) == 0:
             return []
         text = ". ".join([f"a {l}" for l in labels]) + "."
@@ -276,10 +280,7 @@ class HFGroundedDINO:
         outputs = self.model(**inputs)
         target_sizes = [image.size[::-1]]
         result = _post_process_compat(self.processor, outputs, inputs.input_ids, target_sizes, box_threshold, text_threshold)
-
-        # Robust label extraction: prefer text_labels (>=4.51), fallback to labels
         label_list = result.get("text_labels", result.get("labels", []))
-
         dets: List[Dict[str, Any]] = []
         for box, score, lab in zip(result["boxes"], result["scores"], label_list):
             x_min, y_min, x_max, y_max = [float(x) for x in box.tolist()]
@@ -289,28 +290,83 @@ class HFGroundedDINO:
 
 
 # ==============================
-# Context exclusions: windows/doors
+# GroundedSAM Pipeline
 # ==============================
-def get_exclusion_boxes(detector: Optional[HFGroundedDINO], image: Image.Image) -> List[List[float]]:
-    """Detect windows/doors and return padded exclusion boxes."""
-    if detector is None:
-        return []
-    W, H = image.size
-    dets = detector.detect(image, CONTEXT_EXCLUDE_LABELS, box_threshold=EXCLUSION_BOX_TH, text_threshold=EXCLUSION_TEXT_TH)
-    boxes = []
-    for d in dets:
-        boxes.append(expand_box(d["box"], W, H, EXCLUSION_PAD_RATIO))
-    if boxes:
-        print(f"🚧 Exclusion zones (windows/doors): {len(boxes)}")
-    return boxes
+class GroundedSAMPipeline:
+    """GroundingDINO detection → SAM segmentation → save masks & JSON."""
+    def __init__(self, sam_checkpoint: str, output_dir: str):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.output_dir = output_dir
+        self.sam_predictor: Optional[SamPredictor] = None
+        self.grounding: Optional[HFGroundedDINO] = None
 
-def overlaps_exclusions(label: str, box: List[float], exclusions: List[List[float]]) -> bool:
-    """Return True if box should be dropped due to exclusion overlap."""
+        # Prepare output folders
+        os.makedirs(os.path.join(self.output_dir, "masks"), exist_ok=True)
+        os.makedirs(os.path.join(self.output_dir, "visualizations"), exist_ok=True)
+
+        # Initialize SAM and DINO
+        if SAM_AVAILABLE and os.path.exists(sam_checkpoint):
+            self._init_sam(sam_checkpoint)
+        if TRANSFORMERS_AVAILABLE:
+            self._init_grounding_detector()
+        else:
+            print("❌ transformers not available; detection will be skipped.")
+
+    def _init_sam(self, checkpoint_path: str):
+        """Load SAM (ViT-H) checkpoint and create predictor."""
+        try:
+            print("🔧 Initializing SAM...")
+            sam = sam_model_registry["vit_h"](checkpoint=checkpoint_path)
+            sam.to(self.device)
+            self.sam_predictor = SamPredictor(sam)
+            print(f"✅ SAM initialized (device: {self.device})")
+        except Exception as e:
+            print(f"❌ Failed to initialize SAM: {e}")
+
+    def _init_grounding_detector(self):
+        """Create GroundingDINO detector + processor."""
+        try:
+            self.grounding = HFGroundedDINO(model_id="IDEA-Research/grounding-dino-base", device=self.device)
+        except Exception as e:
+            print(f"❌ Failed to initialize GroundingDINO: {e}")
+            self.grounding = None
+
+    def segment_with_sam(self, image_rgb: np.ndarray, boxes_xyxy: List[List[float]]) -> List[np.ndarray]:
+        """Segment each box with SAM; returns a list of 0/1 masks."""
+        if self.sam_predictor is None or len(boxes_xyxy) == 0:
+            return []
+        self.sam_predictor.set_image(image_rgb)
+        masks_out: List[np.ndarray] = []
+        for box in boxes_xyxy:
+            box_np = np.array(box, dtype=np.float32)
+            masks, scores, _ = self.sam_predictor.predict(box=box_np, multimask_output=True)
+            best_mask = masks[np.argmax(scores)]
+            masks_out.append(best_mask.astype(np.uint8))
+        return masks_out
+
+
+# ==============================
+# Exclusion (window/door) helpers
+# ==============================
+def exclusion_overlap_ratio(box: List[float], excl_mask: np.ndarray) -> float:
+    """Return the fraction (0..1) of the candidate box covered by the exclusion mask."""
+    x1, y1, x2, y2 = map(int, [box[0], box[1], box[2], box[3]])
+    x1 = max(0, x1); y1 = max(0, y1)
+    x2 = min(excl_mask.shape[1]-1, x2); y2 = min(excl_mask.shape[0]-1, y2)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    sub = excl_mask[y1:y2, x1:x2]
+    if sub.size == 0:
+        return 0.0
+    return float(sub.mean())  # mean equals coverage ratio for binary mask
+
+
+def overlaps_exclusions_fallback(label: str, box: List[float], exclusions: List[List[float]]) -> bool:
+    """Fallback rule when we only have exclusion boxes (no mask): IoU and optional center rule."""
     if not exclusions:
         return False
-    iou_thr = EXCLUSION_IOU_PLANT if label == "plant" else EXCLUSION_IOU
     for ex in exclusions:
-        if iou_xyxy(box, ex) >= iou_thr:
+        if iou_xyxy(box, ex) >= 0.20:
             return True
         if EXCLUSION_CENTER_RULE and center_in_box(box, ex):
             return True
@@ -318,10 +374,11 @@ def overlaps_exclusions(label: str, box: List[float], exclusions: List[List[floa
 
 
 # ==============================
-# Candidate filtering using detector (score + area + exclusions)
+# Candidate filtering (mask-aware)
 # ==============================
 def _valid_by_area(box: List[float], img_area: float,
-                   min_ratio: float = MIN_AREA_RATIO, max_ratio: float = MAX_AREA_RATIO) -> bool:
+                   min_ratio: float, max_ratio: float) -> bool:
+    """Check if box area falls within a given [min_ratio, max_ratio] of image area."""
     x1, y1, x2, y2 = box
     area = max(0.0, (x2 - x1)) * max(0.0, (y2 - y1))
     ratio = area / img_area if img_area > 0 else 0.0
@@ -332,13 +389,20 @@ def filter_candidates_with_detector(
     image: Image.Image,
     candidates: List[str],
     exclusions: Optional[List[List[float]]] = None,
+    exclusion_mask: Optional[np.ndarray] = None,
     min_area_ratio: float = MIN_AREA_RATIO,
     max_area_ratio: float = MAX_AREA_RATIO,
     top_k: int = MAX_PROMPTS,
     box_th: float = BOX_THRESHOLD,
     text_th: float = TEXT_THRESHOLD,
+    overlap_drop: float = EXCLUSION_OVERLAP_DROP,
 ) -> List[str]:
-    """Keep labels that produce at least one good detection (score + area) not overlapping exclusions."""
+    """
+    Keep labels that produce at least one valid detection after:
+    - exclusion mask coverage check (preferred),
+    - or fallback box-based exclusion (IoU/center),
+    - and area constraints.
+    """
     if detector is None or len(candidates) == 0:
         return candidates[:top_k]
 
@@ -354,11 +418,21 @@ def filter_candidates_with_detector(
         valid_any = False
         for d in dets:
             box = d["box"]
-            if exclusions and overlaps_exclusions(label, box, exclusions):
+            # 1) Exclusion mask (preferred)
+            if exclusion_mask is not None:
+                ov = exclusion_overlap_ratio(box, exclusion_mask)
+                if ov >= overlap_drop:
+                    continue
+            # 2) Fallback to box-only exclusion if mask is unavailable
+            elif exclusions and overlaps_exclusions_fallback(label, box, exclusions):
                 continue
-            if _valid_by_area(box, img_area, min_area_ratio, max_area_ratio):
-                valid_any = True
-                best = max(best, d["score"])
+            # 3) Area constraint
+            if not _valid_by_area(box, img_area, min_area_ratio, max_area_ratio):
+                continue
+
+            valid_any = True
+            best = max(best, d["score"])
+
         if valid_any:
             ranked.append((label, best))
 
@@ -371,92 +445,60 @@ def select_labels_for_segmentation(
     image: Image.Image,
     gpt_raw: List[str],
     exclusions: Optional[List[List[float]]] = None,
+    exclusion_mask: Optional[np.ndarray] = None,
+    box_th: float = BOX_THRESHOLD,
+    text_th: float = TEXT_THRESHOLD,
+    min_area_ratio: float = MIN_AREA_RATIO,
+    max_area_ratio: float = MAX_AREA_RATIO,
+    overlap_drop: float = EXCLUSION_OVERLAP_DROP,
 ) -> List[str]:
     """
-    Ensure ≥1 label while being conservative w.r.t. windows/doors.
-    1) GPT → normalized → filtered by detector + exclusions.
-    2) If empty, try preferred labels with current thresholds.
+    Label selection with a ≥1 guarantee (indoor-first):
+    1) GPT → normalize → filter, respecting exclusion mask (or fallback boxes).
+    2) If empty, try prioritized defaults.
     3) If still empty, relax thresholds once.
     4) If still empty, fallback to ["sofa"].
     """
     # Step 1
     labels = normalize_and_filter_labels(gpt_raw)
-    labels = filter_candidates_with_detector(detector, image, labels, exclusions=exclusions, top_k=MAX_PROMPTS)
+    labels = filter_candidates_with_detector(
+        detector, image, labels,
+        exclusions=exclusions, exclusion_mask=exclusion_mask,
+        top_k=MAX_PROMPTS, box_th=box_th, text_th=text_th,
+        min_area_ratio=min_area_ratio, max_area_ratio=max_area_ratio,
+        overlap_drop=overlap_drop,
+    )
     if labels:
         return labels
 
     # Step 2
     priors = normalize_and_filter_labels(PREFERRED_ORDER)
-    labels = filter_candidates_with_detector(detector, image, priors, exclusions=exclusions, top_k=1)
+    labels = filter_candidates_with_detector(
+        detector, image, priors,
+        exclusions=exclusions, exclusion_mask=exclusion_mask,
+        top_k=1, box_th=box_th, text_th=text_th,
+        min_area_ratio=min_area_ratio, max_area_ratio=max_area_ratio,
+        overlap_drop=overlap_drop,
+    )
     if labels:
         return labels
 
     # Step 3 (relax)
     labels = filter_candidates_with_detector(
-        detector, image, priors, exclusions=exclusions, top_k=1,
-        box_th=max(0.15, BOX_THRESHOLD - 0.15),
-        text_th=max(0.15, TEXT_THRESHOLD - 0.10),
-        min_area_ratio=max(0.005, MIN_AREA_RATIO / 2.0),
-        max_area_ratio=min(0.50, MAX_AREA_RATIO * 1.5),
+        detector, image, priors,
+        exclusions=exclusions, exclusion_mask=exclusion_mask,
+        top_k=1,
+        box_th=max(0.15, box_th - 0.15),
+        text_th=max(0.15, text_th - 0.10),
+        min_area_ratio=max(0.005, min_area_ratio / 2.0),
+        max_area_ratio=min(0.50, max_area_ratio * 1.5),
+        overlap_drop=min(0.60, max(0.30, overlap_drop + 0.10)),
     )
     if labels:
         return labels
 
     # Step 4
     return ["sofa"]
-
-
-# ==============================
-# GroundedSAM Pipeline
-# ==============================
-class GroundedSAMPipeline:
-    """GroundingDINO detection → SAM segmentation → save masks & JSON."""
-    def __init__(self, sam_checkpoint: str, output_dir: str):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.output_dir = output_dir
-        self.sam_predictor: Optional[SamPredictor] = None
-        self.grounding: Optional[HFGroundedDINO] = None
-
-        os.makedirs(os.path.join(self.output_dir, "masks"), exist_ok=True)
-        os.makedirs(os.path.join(self.output_dir, "visualizations"), exist_ok=True)
-
-        if SAM_AVAILABLE and os.path.exists(sam_checkpoint):
-            self._init_sam(sam_checkpoint)
-        if TRANSFORMERS_AVAILABLE:
-            self._init_grounding_detector()
-        else:
-            print("❌ transformers not available; detection will be skipped.")
-
-    def _init_sam(self, checkpoint_path: str):
-        try:
-            print("🔧 Initializing SAM...")
-            sam = sam_model_registry["vit_h"](checkpoint=checkpoint_path)
-            sam.to(self.device)
-            self.sam_predictor = SamPredictor(sam)
-            print(f"✅ SAM initialized (device: {self.device})")
-        except Exception as e:
-            print(f"❌ Failed to initialize SAM: {e}")
-
-    def _init_grounding_detector(self):
-        try:
-            self.grounding = HFGroundedDINO(model_id="IDEA-Research/grounding-dino-base", device=self.device)
-        except Exception as e:
-            print(f"❌ Failed to initialize GroundingDINO: {e}")
-            self.grounding = None
-
-    def segment_with_sam(self, image_rgb: np.ndarray, boxes_xyxy: List[List[float]]) -> List[np.ndarray]:
-        """Segment each box with SAM; returns 0/1 masks."""
-        if self.sam_predictor is None:
-            print("❌ SAM not initialized.")
-            return []
-        self.sam_predictor.set_image(image_rgb)
-        masks_out: List[np.ndarray] = []
-        for box in boxes_xyxy:
-            box_np = np.array(box, dtype=np.float32)
-            masks, scores, _ = self.sam_predictor.predict(box=box_np, multimask_output=True)
-            best_mask = masks[np.argmax(scores)]
-            masks_out.append(best_mask.astype(np.uint8))
-        return masks_out
 
 
 # ==============================
@@ -474,67 +516,96 @@ def main(args):
         return
     image_rgb = np.array(panorama_pil)
 
-    # Init pipeline
+    # Initialize SAM + GroundingDINO
     pipeline = GroundedSAMPipeline(args.sam_checkpoint, args.output_dir)
 
-    # Detect exclusion zones first (windows/doors)
-    exclusions = get_exclusion_boxes(pipeline.grounding, panorama_pil)
+    # 1) Detect window/door boxes first
+    W, H = panorama_pil.size
+    exclusions_boxes: List[List[float]] = []
+    exclusion_mask: Optional[np.ndarray] = None
 
-    # GPT → label selection with ≥1 guarantee (considering exclusions)
-    raw_labels = get_asset_prompts_from_gpt(args.panorama_path, args.openai_api_key)
-    final_labels = select_labels_for_segmentation(pipeline.grounding, panorama_pil, raw_labels, exclusions=exclusions)
+    if pipeline.grounding is not None:
+        dets_ex = pipeline.grounding.detect(
+            panorama_pil, CONTEXT_EXCLUDE_LABELS,
+            box_threshold=args.exclusion_box_th, text_threshold=args.exclusion_text_th
+        )
+        exclusions_boxes = [expand_box(d["box"], W, H, args.exclusion_pad_ratio) for d in dets_ex]
+
+    # 2) Build a union exclusion mask with SAM if possible
+    if args.exclusion_use_mask and SAM_AVAILABLE and len(exclusions_boxes) > 0:
+        masks = pipeline.segment_with_sam(image_rgb, exclusions_boxes)
+        if len(masks) > 0:
+            exclusion_mask = np.zeros((H, W), dtype=np.uint8)
+            for m in masks:
+                exclusion_mask = np.maximum(exclusion_mask, (m > 0).astype(np.uint8))
+            if args.exclusion_mask_dilate_px > 0:
+                k = int(args.exclusion_mask_dilate_px)
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(1, k), max(1, k)))
+                exclusion_mask = cv2.dilate(exclusion_mask, kernel, iterations=1)
+            print("🚧 Exclusion mask ready (windows/doors union).")
+    elif len(exclusions_boxes) > 0:
+        print(f"🚧 Exclusion zones (boxes only): {len(exclusions_boxes)}")
+
+    # Labels: override or GPT
+    override_labels = [s for s in (args.labels.split(",") if args.labels else [])]
+    raw_labels = get_asset_prompts_from_gpt(args.panorama_path, args.openai_api_key, override_labels or None)
+
+    # Label selection with ≥1 guarantee (respecting exclusion)
+    final_labels = select_labels_for_segmentation(
+        pipeline.grounding, panorama_pil, raw_labels,
+        exclusions=exclusions_boxes, exclusion_mask=exclusion_mask,
+        box_th=args.box_threshold, text_th=args.text_threshold,
+        min_area_ratio=args.min_area_ratio, max_area_ratio=args.max_area_ratio,
+        overlap_drop=args.exclusion_overlap_drop
+    )
     print(f"🎯 Final labels to try: {final_labels}")
 
-    # Detect → cross-label NMS → segment
+    # Detection → cross-label NMS → SAM segmentation
     all_results: Dict[str, List[Dict[str, Any]]] = {}
-    kept_boxes: List[List[float]] = []  # for cross-label NMS across prompts
-
-    W, H = panorama_pil.size
+    kept_boxes: List[List[float]] = []
     img_area = float(W * H)
 
     for prompt in final_labels:
         dets = pipeline.grounding.detect(
             panorama_pil, [prompt],
-            box_threshold=BOX_THRESHOLD, text_threshold=TEXT_THRESHOLD
+            box_threshold=args.box_threshold, text_threshold=args.text_threshold
         ) if pipeline.grounding else []
 
-        rej_area = rej_excl = rej_nms = 0
         good: List[Dict[str, Any]] = []
-
-        # Area & exclusion filters
         for d in dets:
             box = d["box"]
-            if exclusions and overlaps_exclusions(prompt, box, exclusions):
-                rej_excl += 1
+
+            # Exclude outdoor/undesired via mask
+            if exclusion_mask is not None:
+                if exclusion_overlap_ratio(box, exclusion_mask) >= args.exclusion_overlap_drop:
+                    continue
+            # Fallback to simple box-based exclusion
+            elif exclusions_boxes and overlaps_exclusions_fallback(prompt, box, exclusions_boxes):
                 continue
+
+            # Area constraints
             area_ratio = ((box[2]-box[0])*(box[3]-box[1]))/img_area
-            if not (MIN_AREA_RATIO <= area_ratio <= MAX_AREA_RATIO):
-                rej_area += 1
+            if not (args.min_area_ratio <= area_ratio <= args.max_area_ratio):
                 continue
+
+            # Cross-label NMS
+            if any(iou_xyxy(box, kb) >= CROSS_LABEL_NMS_IOU for kb in kept_boxes):
+                continue
+
             good.append(d)
+            kept_boxes.append(box)
 
-        # Cross-label NMS
-        deduped: List[Dict[str, Any]] = []
-        for d in good:
-            if any(iou_xyxy(d["box"], kb) >= CROSS_LABEL_NMS_IOU for kb in kept_boxes):
-                rej_nms += 1
-                continue
-            deduped.append(d)
-            kept_boxes.append(d["box"])
+        if len(good) == 0:
+            continue
 
-        # Print per-label ONLY if something will be segmented
-        if len(deduped) > 0:
-            print(f"🧩 {prompt}: kept={len(deduped)}")
-
-        if len(deduped) == 0:
-            continue  # ← do not create empty entry at all
+        print(f"🧩 {prompt}: kept={len(good)}")
 
         # Segment with SAM
-        boxes = [d["box"] for d in deduped]
+        boxes = [d["box"] for d in good]
         masks = pipeline.segment_with_sam(image_rgb, boxes)
 
         merged = []
-        for d, m in zip(deduped, masks):
+        for d, m in zip(good, masks):
             merged.append({
                 "label": prompt,
                 "score": d["score"],
@@ -543,7 +614,7 @@ def main(args):
             })
         all_results[prompt] = merged
 
-    # Final summary: ONLY successful labels
+    # Summary
     segmented_counts = {k: len(v) for k, v in all_results.items() if len(v) > 0}
     if segmented_counts:
         pretty = ", ".join([f"{k} x{c}" for k, c in segmented_counts.items()])
@@ -551,7 +622,7 @@ def main(args):
     else:
         print("⚠️ No assets segmented.")
 
-    # Save visualization & JSON summary with ONLY successful labels
+    # Visualization & JSON export
     image_bgr = cv2.imread(args.panorama_path)
     if image_bgr is None:
         print("❌ Failed to load image for visualization.")
@@ -568,19 +639,17 @@ def main(args):
 
     for prompt, dets in all_results.items():
         if len(dets) == 0:
-            continue  # ← skip empty labels entirely
+            continue
 
         color = colors[color_idx % len(colors)]
         color_idx += 1
-
-        H, W = vis_image.shape[:2]
-        combined_mask = np.zeros((H, W), dtype=np.uint8)
+        H2, W2 = vis_image.shape[:2]
+        combined_mask = np.zeros((H2, W2), dtype=np.uint8)
         json_items = []
 
         for d in dets:
             mask = d["mask"].astype(np.uint8)
             combined_mask = np.maximum(combined_mask, mask)
-
             item = {
                 "label": d.get("label", prompt),
                 "score": float(d.get("score", 0.0)),
@@ -597,7 +666,6 @@ def main(args):
         mask_path = os.path.join(args.output_dir, "masks", prompt_fname)
         os.makedirs(os.path.dirname(mask_path), exist_ok=True)
         cv2.imwrite(mask_path, combined_mask * 255)
-
         for it in json_items:
             it["mask_saved_as"] = os.path.relpath(mask_path, args.output_dir)
 
@@ -609,7 +677,6 @@ def main(args):
     cv2.imwrite(vis_path, vis_image)
     summary["visualization"] = os.path.relpath(vis_path, args.output_dir)
 
-    # Keep filename stable; content includes only successful labels
     json_path = os.path.join(args.output_dir, "results.json")
     with open(json_path, "w") as f:
         json.dump(summary, f, indent=2)
@@ -621,10 +688,34 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Conservative panorama segmentation for VR assets (success-only output).")
-    parser.add_argument("--sam_checkpoint", type=str, required=True, help="Path to the SAM checkpoint file.")
-    parser.add_argument("--panorama_path", type=str, required=True, help="Path to the panorama image to process.")
-    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save the results.")
-    parser.add_argument("--openai_api_key", type=str, default=os.getenv("OPENAI_API_KEY"), help="OpenAI API key.")
+    parser = argparse.ArgumentParser(description="Indoor-first panorama segmentation (success-only).")
+    parser.add_argument("--sam_checkpoint", type=str, required=True, help="Path to SAM ViT-H checkpoint.")
+    parser.add_argument("--panorama_path", type=str, required=True, help="Path to the input equirect panorama.")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to write masks/visualization/JSON.")
+    parser.add_argument("--openai_api_key", type=str, default=os.getenv("OPENAI_API_KEY"), help="OpenAI API key for GPT step.")
+
+    # Optional overrides
+    parser.add_argument("--labels", type=str, default=None, help="Comma-separated labels to force (skip GPT).")
+
+    # Thresholds & ratios
+    parser.add_argument("--box_threshold", type=float, default=BOX_THRESHOLD, help="GroundingDINO box threshold.")
+    parser.add_argument("--text_threshold", type=float, default=TEXT_THRESHOLD, help="GroundingDINO text threshold.")
+    parser.add_argument("--min_area_ratio", type=float, default=MIN_AREA_RATIO, help="Min area ratio for a kept box.")
+    parser.add_argument("--max_area_ratio", type=float, default=MAX_AREA_RATIO, help="Max area ratio for a kept box.")
+
+    # Exclusion controls
+    parser.add_argument("--exclusion_use_mask", type=lambda x: str(x).lower() not in ["0","false","no"],
+                        default=EXCLUSION_USE_MASK, help="Use SAM mask for exclusions instead of box-only fallback.")
+    parser.add_argument("--exclusion_mask_dilate_px", type=int, default=EXCLUSION_MASK_DILATE_PX,
+                        help="Dilation (px) applied to the union exclusion mask.")
+    parser.add_argument("--exclusion_overlap_drop", type=float, default=EXCLUSION_OVERLAP_DROP,
+                        help="Drop a candidate if exclusion mask covers this fraction of its box.")
+    parser.add_argument("--exclusion_box_th", type=float, default=EXCLUSION_BOX_TH,
+                        help="Box threshold for window/door detection.")
+    parser.add_argument("--exclusion_text_th", type=float, default=EXCLUSION_TEXT_TH,
+                        help="Text threshold for window/door detection.")
+    parser.add_argument("--exclusion_pad_ratio", type=float, default=EXCLUSION_PAD_RATIO,
+                        help="Padding ratio applied to exclusion boxes in box-only fallback.")
+
     args = parser.parse_args()
     main(args)
