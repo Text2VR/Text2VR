@@ -4,46 +4,73 @@ services:
   # Service for running the original DreamScene360 training
   dreamscene360:
     build:
-      context: ./dreamscene360_service
+      context: ./DREAMSCENE360
       dockerfile: Dockerfile
-    container_name: dreamscene360_service_container
-    ipc: host # Shared memory for multiprocessing
+    container_name: text2vr_dreamscene360
+    working_dir: /workspace/DREAMSCENE360
+    environment:
+      # Pass the API key from the host shell environment to the container
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+    ipc: host
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: 1            
               capabilities: [gpu]
-    environment:
-      # Pass the API key from the host shell environment to the container
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      - ./output:/workspace/DreamScene360/output
-      - ./pre_checkpoints:/workspace/DreamScene360/pre_checkpoints
-      - ./dreamscene360_service:/workspace/DreamScene360
-    working_dir: /workspace/DreamScene360
+      # DreamScene360 code + outputs + checkpoints
+      - ./DREAMSCENE360:/workspace/DREAMSCENE360
+      - ./output:/workspace/DREAMSCENE360/output
+      - ./pre_checkpoints:/workspace/DREAMSCENE360/pre_checkpoints
 
-  # Service for running the new panorama segmentation pipeline
-  segmentation:
+  # Service for running the new panorama segmentation pipelin
+  asset_seg:
     build:
-      context: ./segmentation_service
+      context: ./ASSET_SEG
       dockerfile: Dockerfile
-    container_name: segmentation_service_container
+    container_name: text2vr_asset_seg
+    working_dir: /app
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+    ipc: host
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: 1            
               capabilities: [gpu]
-    environment:
-      # Pass the API key from the host shell environment to the container
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      # Mount shared folders
+      # share outputs, checkpoints, and the panorama data folder
       - ./output:/app/output
       - ./pre_checkpoints:/app/checkpoints
-      # Mount the data folder from the dreamscene360 service to read the panorama
-      - ./dreamscene360_service/data:/app/data
-      - ./segmentation_service/segment_panorama.py:/app/segment_panorama.py:ro
+      - ./DREAMSCENE360/data:/app/data
+      - ./ASSET_SEG/segment_panorama.py:/app/segment_panorama.py:ro
+
+  # Service for running the background inpainting pipeline
+  bg_inpaint:
+      build:
+        context: ./BG_INPAINT
+        dockerfile: Dockerfile
+      container_name: text2vr_bg_inpaint
+      working_dir: /workspace
+      environment:
+        - HF_HOME=/workspace/.cache/huggingface
+        - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+        - NVIDIA_VISIBLE_DEVICES=all
+      ipc: host
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: 1            
+                capabilities: [gpu]
+      volumes:
+        - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
+        - ./DREAMSCENE360/data:/workspace/data
+        - ./output:/workspace/output

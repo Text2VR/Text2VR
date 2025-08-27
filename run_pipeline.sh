@@ -8,21 +8,35 @@ set -e
 # Make sure your .env file exists in the root directory and contains:
 # OPENAI_API_KEY="sk-..."
 
+# set Text2VR/.env !!
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+else
+    echo "❌ ERROR: .env file not found! Please create one with your OPENAI_API_KEY."
+    exit 1
+fi
+# ------------------------------
+
 # Define the scene name and prompt
-SCENE_NAME="indoor_livingroom"
-PANO_PROMPT="A spacious modern living room with a gray sofa and a potted plant."
+SCENE_NAME="indoor_livingroom_compose"
+PROMPT="A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus."
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
-# Host machine paths
-HOST_PANO_DATA_DIR="./dreamscene360_service/data/${SCENE_NAME}"
-HOST_PANO_IMAGE_PATH="${HOST_PANO_DATA_DIR}/diffusion_img.png"
+# Host paths
+HOST_SCENE_DIR="./DREAMSCENE360/data/${SCENE_NAME}"
+HOST_PANO="${HOST_SCENE_DIR}/panorama.png"
+HOST_INPAINT="${HOST_SCENE_DIR}/inpainted_panorama.png"
 
-# Container-internal paths
-CONTAINER_DS360_DATA_DIR="/workspace/DreamScene360/data/${SCENE_NAME}"
-CONTAINER_DS360_OUTPUT_DIR="/workspace/DreamScene360/output/${SCENE_NAME}_pano_gen"
-CONTAINER_SEG_PANO_PATH="/app/data/${SCENE_NAME}/diffusion_img.png"
-CONTAINER_SEG_OUTPUT_DIR="/app/output/${SCENE_NAME}_masks"
-CONTAINER_SAM_CHECKPOINT="/app/checkpoints/sam_vit_h_4b8939.pth"
+# Container paths
+DS360_SCENE_DIR="/workspace/DREAMSCENE360/data/${SCENE_NAME}"
+SEG_PANO="/app/data/${SCENE_NAME}/panorama.png"
+SEG_OUT="/app/output/${SCENE_NAME}_masks"
+SAM_CKPT="/app/checkpoints/sam_vit_h_4b8939.pth"
+
+# BG_INPAINT uses /workspace because of its compose mount
+INPAINT_IN="/workspace/data/${SCENE_NAME}/panorama.png"
+INPAINT_MASK_DIR="/workspace/output/${SCENE_NAME}_masks/masks"
+INPAINT_OUT="/workspace/data/${SCENE_NAME}/inpainted_panorama.png"
 
 # --- PIPELINE EXECUTION ---
 echo "======================================================"
@@ -32,45 +46,52 @@ echo "Scene: ${SCENE_NAME}"
 echo "NOTE: OpenAI API Key will be loaded from your .env file."
 echo ""
 
-# Step 1: Build all services defined in docker-compose.yml
+# --------------------------------------------------------------
+### ONLY needs to be done once, or when Dockerfile changes. ### 
+echo "================= BUILD ================="
 echo "--> Building all services..."
-docker-compose build
+# docker-compose build                                                ### <<<<<<<< !!!!!!
+# --------------------------------------------------------------
 
-# Step 2: Generate the panorama using the 'dreamscene360' service
-echo -e "\n--> STAGE 1: Generating Panorama via [dreamscene360] service..."
-# Create necessary directories and prompt file on the host
-mkdir -p ${HOST_PANO_DATA_DIR}
-echo "${PANO_PROMPT}" > "${HOST_PANO_DATA_DIR}/${SCENE_NAME}_PROMPT.txt"
+echo "================= STAGE 1: PANORAMA GEN ================="
+mkdir -p "${HOST_SCENE_DIR}"
+echo "${PROMPT}" > "${HOST_SCENE_DIR}/prompt.txt"
 
-# Run the training script. The API key is passed automatically by docker-compose.
-docker-compose run --rm dreamscene360 python train.py \
-    -s ${CONTAINER_DS360_DATA_DIR} \
-    -m ${CONTAINER_DS360_OUTPUT_DIR} \
-    --self_refinement \
+docker-compose run --rm dreamscene360 \
+  micromamba run -n dev \
+  python pano_generator.py \
+    --text "$(cat ${HOST_SCENE_DIR}/prompt.txt)" \
+    --output_dir "${DS360_SCENE_DIR}" \
     --api_key "${OPENAI_API_KEY}" \
-    --iterations 1
+    --self_refinement
 
-# Verify that the panorama was created
-if [ ! -f "${HOST_PANO_IMAGE_PATH}" ]; then
-    echo "❌ ERROR: Panorama generation failed. Exiting."
-    exit 1
-fi
-echo "✅ STAGE 1 Complete: Panorama generated."
+test -f "${HOST_PANO}" || { echo "❌ Panorama generation failed"; exit 1; }
 
-# Step 3: Segment the panorama using the 'segmentation' service
-echo -e "\n--> STAGE 2: Segmenting Panorama via [segmentation] service..."
-# The API key is passed automatically by docker-compose from the .env file.
-docker-compose run --rm segmentation python segment_panorama.py \
-    --panorama_path ${CONTAINER_SEG_PANO_PATH} \
-    --output_dir ${CONTAINER_SEG_OUTPUT_DIR} \
-    --sam_checkpoint ${CONTAINER_SAM_CHECKPOINT}
+echo "================= STAGE 2: ASSET SEG ================="
+docker-compose run --rm asset_seg \
+  python segment_panorama.py \
+    --panorama_path "${SEG_PANO}" \
+    --output_dir "${SEG_OUT}" \
+    --sam_checkpoint "${SAM_CKPT}"
 
-echo "✅ STAGE 2 Complete: Masks generated in ./output/${SCENE_NAME}_masks"
+echo "================= STAGE 3: BG INPAINT ================="
+docker-compose run --rm bg_inpaint \
+  python /workspace/inpaint_panorama.py \
+    --image "${INPAINT_IN}" \
+    --mask_dir "${INPAINT_MASK_DIR}" \
+    --output "${INPAINT_OUT}"
 
-# Step 4: Placeholder for the final unified training
-echo -e "\n--> STAGE 3: Unified Training (Placeholder)..."
-echo "    The next step would be to run a new hybrid training script"
-echo "    in the 'dreamscene360' service, using the masks from STAGE 2."
+test -f "${HOST_INPAINT}" || { echo "❌ Inpainting failed"; exit 1; }
+
+echo "================= STAGE 4: DREAMSCENE360 TRAIN ================="
+docker-compose run --rm dreamscene360 \
+  micromamba run -n dev \
+  python train.py \
+    -s "${DS360_SCENE_DIR}" \
+    -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply" \
+    --pano_path "${DS360_SCENE_DIR}/inpainted_panorama.png" \
+    --debug
+
 
 echo -e "\n======================================================"
 echo "      PIPELINE FINISHED SUCCESSFULLY!  "
