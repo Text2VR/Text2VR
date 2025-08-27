@@ -64,10 +64,11 @@ docker-compose run --rm dreamscene360 \
     --text "$(cat ${HOST_SCENE_DIR}/prompt.txt)" \
     --output_dir "${DS360_SCENE_DIR}" \
     --api_key "${OPENAI_API_KEY}" \
-    --self_refinement
+    --self_refinement \
+    
     # If your pano_generator.py supports knobs, uncomment:
-    # --num_prompt 2 \
-    # --max_rounds 2
+    --num_prompt 2 \
+    --max_rounds 2
 
 test -f "${HOST_PANO}" || { echo "❌ Panorama generation failed"; exit 1; }
 
