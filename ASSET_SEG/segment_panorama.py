@@ -3,12 +3,14 @@
 """
 Indoor-first panorama segmentation for VR assets.
 
-Pipeline:
+Key ideas:
 - (Optionally) ask GPT to propose candidate asset labels from a whitelisted vocabulary.
 - Use GroundingDINO for text-conditioned object detection.
 - Use SAM to segment final masks for kept boxes.
-- Build a window/door "exclusion mask" and drop candidates that significantly overlap it.
-  (This aims to avoid outdoor objects while keeping indoor items near windows.)
+- Build a window/door "exclusion mask" and prefer mask-based filtering over box-only.
+- NEW: "indoor anchor" rule → even if a box overlaps the exclusion mask a lot,
+  keep it when the bottom-center of the box lies in indoor area. This helps
+  items near the window (e.g., plants, sofas) survive the filter.
 - Only output/save labels that actually produced at least one final mask.
 """
 
@@ -60,17 +62,23 @@ SYNONYMS = {
     "couch": "sofa",
     "television": "tv",
     "potted plant": "plant",
+    "houseplant": "plant",
+    "green plant": "plant",
+    "planter": "plant",
+    "bush": "plant",
+    "shrub": "plant",
+    "palm": "plant",
     "curtains": "curtain",
 }
 DEFAULT_FALLBACK = ["sofa", "chair", "table", "plant", "lamp", "bench"]
 
 # Default thresholds (can be overridden via CLI)
 MIN_PROMPTS = 1
-MAX_PROMPTS = 3
+MAX_PROMPTS = 5                 # ↑ allow more labels to compete (was 3)
 BOX_THRESHOLD = 0.30
 TEXT_THRESHOLD = 0.25
-MIN_AREA_RATIO = 0.01      # keep boxes covering at least 1% of the image
-MAX_AREA_RATIO = 0.30      # and at most 30% of the image
+MIN_AREA_RATIO = 0.01           # keep boxes covering at least 1% of the image
+MAX_AREA_RATIO = 0.30           # and at most 30% of the image
 
 # Priority order to ensure at least one object remains
 PREFERRED_ORDER = [
@@ -346,7 +354,7 @@ class GroundedSAMPipeline:
 
 
 # ==============================
-# Exclusion (window/door) helpers
+# Exclusion helpers
 # ==============================
 def exclusion_overlap_ratio(box: List[float], excl_mask: np.ndarray) -> float:
     """Return the fraction (0..1) of the candidate box covered by the exclusion mask."""
@@ -360,7 +368,6 @@ def exclusion_overlap_ratio(box: List[float], excl_mask: np.ndarray) -> float:
         return 0.0
     return float(sub.mean())  # mean equals coverage ratio for binary mask
 
-
 def overlaps_exclusions_fallback(label: str, box: List[float], exclusions: List[List[float]]) -> bool:
     """Fallback rule when we only have exclusion boxes (no mask): IoU and optional center rule."""
     if not exclusions:
@@ -369,6 +376,25 @@ def overlaps_exclusions_fallback(label: str, box: List[float], exclusions: List[
         if iou_xyxy(box, ex) >= 0.20:
             return True
         if EXCLUSION_CENTER_RULE and center_in_box(box, ex):
+            return True
+    return False
+
+def anchor_inside_room(box: List[float], excl_mask: Optional[np.ndarray]) -> bool:
+    """
+    "Indoor anchor" rule: if the bottom-center of `box` lies in indoor area (mask==0),
+    treat it as indoor even if coverage with exclusion mask is high.
+    """
+    if excl_mask is None:
+        return True
+    H, W = excl_mask.shape
+    x1, y1, x2, y2 = box
+    cx = int(round(0.5 * (x1 + x2)))
+    # sample a few pixels above the bottom edge to be robust
+    ys = [int(y2 - 0.01 * H), int(y2 - 0.03 * H), int(y2 - 0.05 * H)]
+    cx = np.clip(cx, 0, W - 1)
+    for y in ys:
+        y = int(np.clip(y, 0, H - 1))
+        if excl_mask[y, cx] == 0:
             return True
     return False
 
@@ -396,10 +422,11 @@ def filter_candidates_with_detector(
     box_th: float = BOX_THRESHOLD,
     text_th: float = TEXT_THRESHOLD,
     overlap_drop: float = EXCLUSION_OVERLAP_DROP,
+    anchor_enable: bool = True,
 ) -> List[str]:
     """
     Keep labels that produce at least one valid detection after:
-    - exclusion mask coverage check (preferred),
+    - exclusion mask coverage check (preferred) with indoor-anchor override,
     - or fallback box-based exclusion (IoU/center),
     - and area constraints.
     """
@@ -418,10 +445,10 @@ def filter_candidates_with_detector(
         valid_any = False
         for d in dets:
             box = d["box"]
-            # 1) Exclusion mask (preferred)
+            # 1) Exclusion mask (preferred), with "indoor anchor" override
             if exclusion_mask is not None:
                 ov = exclusion_overlap_ratio(box, exclusion_mask)
-                if ov >= overlap_drop:
+                if ov >= overlap_drop and (not anchor_enable or not anchor_inside_room(box, exclusion_mask)):
                     continue
             # 2) Fallback to box-only exclusion if mask is unavailable
             elif exclusions and overlaps_exclusions_fallback(label, box, exclusions):
@@ -451,6 +478,8 @@ def select_labels_for_segmentation(
     min_area_ratio: float = MIN_AREA_RATIO,
     max_area_ratio: float = MAX_AREA_RATIO,
     overlap_drop: float = EXCLUSION_OVERLAP_DROP,
+    top_k: int = MAX_PROMPTS,
+    anchor_enable: bool = True,
 ) -> List[str]:
     """
     Label selection with a ≥1 guarantee (indoor-first):
@@ -464,9 +493,9 @@ def select_labels_for_segmentation(
     labels = filter_candidates_with_detector(
         detector, image, labels,
         exclusions=exclusions, exclusion_mask=exclusion_mask,
-        top_k=MAX_PROMPTS, box_th=box_th, text_th=text_th,
+        top_k=top_k, box_th=box_th, text_th=text_th,
         min_area_ratio=min_area_ratio, max_area_ratio=max_area_ratio,
-        overlap_drop=overlap_drop,
+        overlap_drop=overlap_drop, anchor_enable=anchor_enable,
     )
     if labels:
         return labels
@@ -478,7 +507,7 @@ def select_labels_for_segmentation(
         exclusions=exclusions, exclusion_mask=exclusion_mask,
         top_k=1, box_th=box_th, text_th=text_th,
         min_area_ratio=min_area_ratio, max_area_ratio=max_area_ratio,
-        overlap_drop=overlap_drop,
+        overlap_drop=overlap_drop, anchor_enable=anchor_enable,
     )
     if labels:
         return labels
@@ -493,6 +522,7 @@ def select_labels_for_segmentation(
         min_area_ratio=max(0.005, min_area_ratio / 2.0),
         max_area_ratio=min(0.50, max_area_ratio * 1.5),
         overlap_drop=min(0.60, max(0.30, overlap_drop + 0.10)),
+        anchor_enable=anchor_enable,
     )
     if labels:
         return labels
@@ -556,7 +586,8 @@ def main(args):
         exclusions=exclusions_boxes, exclusion_mask=exclusion_mask,
         box_th=args.box_threshold, text_th=args.text_threshold,
         min_area_ratio=args.min_area_ratio, max_area_ratio=args.max_area_ratio,
-        overlap_drop=args.exclusion_overlap_drop
+        overlap_drop=args.exclusion_overlap_drop,
+        top_k=args.max_prompts, anchor_enable=args.anchor_enable,
     )
     print(f"🎯 Final labels to try: {final_labels}")
 
@@ -575,9 +606,10 @@ def main(args):
         for d in dets:
             box = d["box"]
 
-            # Exclude outdoor/undesired via mask
+            # Exclude outdoor/undesired via mask (with indoor-anchor override)
             if exclusion_mask is not None:
-                if exclusion_overlap_ratio(box, exclusion_mask) >= args.exclusion_overlap_drop:
+                if exclusion_overlap_ratio(box, exclusion_mask) >= args.exclusion_overlap_drop \
+                   and (not args.anchor_enable or not anchor_inside_room(box, exclusion_mask)):
                     continue
             # Fallback to simple box-based exclusion
             elif exclusions_boxes and overlaps_exclusions_fallback(prompt, box, exclusions_boxes):
@@ -696,6 +728,9 @@ if __name__ == "__main__":
 
     # Optional overrides
     parser.add_argument("--labels", type=str, default=None, help="Comma-separated labels to force (skip GPT).")
+    parser.add_argument("--max_prompts", type=int, default=MAX_PROMPTS, help="How many label candidates to keep before segmentation.")
+    parser.add_argument("--anchor_enable", type=lambda x: str(x).lower() not in ["0","false","no"], default=True,
+                        help="Enable indoor bottom-center anchor override near windows.")
 
     # Thresholds & ratios
     parser.add_argument("--box_threshold", type=float, default=BOX_THRESHOLD, help="GroundingDINO box threshold.")

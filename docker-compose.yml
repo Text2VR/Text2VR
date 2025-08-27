@@ -36,6 +36,11 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - DIFFUSERS_CACHE=/root/.cache/huggingface/diffusers
+      - TORCH_HOME=/root/.cache/torch
     ipc: host
     deploy:
       resources:
@@ -50,6 +55,8 @@ services:
       - ./pre_checkpoints:/app/checkpoints
       - ./DREAMSCENE360/data:/app/data
       - ./ASSET_SEG/segment_panorama.py:/app/segment_panorama.py:ro
+      - ./cache/hf:/root/.cache/huggingface
+      - ./cache/torch:/root/.cache/torch
 
   # Service for running the background inpainting pipeline
   bg_inpaint:
@@ -62,6 +69,11 @@ services:
         - HF_HOME=/workspace/.cache/huggingface
         - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
         - NVIDIA_VISIBLE_DEVICES=all
+        - HF_HOME=/root/.cache/huggingface
+        - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+        - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+        - DIFFUSERS_CACHE=/root/.cache/huggingface/diffusers
+        - TORCH_HOME=/root/.cache/torch
       ipc: host
       deploy:
         resources:
@@ -74,3 +86,5 @@ services:
         - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
         - ./DREAMSCENE360/data:/workspace/data
         - ./output:/workspace/output
+        - ./cache/hf:/root/.cache/huggingface
+        - ./cache/torch:/root/.cache/torch

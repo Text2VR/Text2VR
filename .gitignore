@@ -16,6 +16,13 @@ pre_checkpoints/
 *.pth
 *.bin
 *.h5
+# ===== HF / model caches =====
+cache/
+**/.cache/
+**/.locks/
+**/huggingface/
+**/hf_cache/
+**/models--*/        # huggingface model dirs
 
 # Large binary files and viewers
 # SIBR_viewers/
