@@ -16,6 +16,7 @@ pre_checkpoints/
 *.pth
 *.bin
 *.h5
+
 # ===== HF / model caches =====
 cache/
 **/.cache/
