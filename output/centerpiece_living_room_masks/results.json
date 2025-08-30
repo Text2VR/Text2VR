@@ -1,0 +1,19 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "sofa": [
+      {
+        "label": "sofa",
+        "score": 0.41877132654190063,
+        "box": [
+          539.9901733398438,
+          254.52227783203125,
+          1021.7346801757812,
+          405.757568359375
+        ],
+        "mask_saved_as": "masks/sofa.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

@@ -1,0 +1,32 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "sofa": [
+      {
+        "label": "sofa",
+        "score": 0.8505902886390686,
+        "box": [
+          753.259521484375,
+          276.06719970703125,
+          947.3411865234375,
+          421.03021240234375
+        ],
+        "mask_saved_as": "masks/sofa.png"
+      }
+    ],
+    "plant": [
+      {
+        "label": "plant",
+        "score": 0.3705541491508484,
+        "box": [
+          555.4549560546875,
+          211.51171875,
+          670.0877685546875,
+          334.61029052734375
+        ],
+        "mask_saved_as": "masks/plant.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

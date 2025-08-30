@@ -15,33 +15,17 @@ else
     echo "❌ ERROR: .env file not found! Please create one with your OPENAI_API_KEY."
     exit 1
 fi
-
-# Load scene definitions from the configuration file
-source scenes.conf
-
-# Check if a scene name was provided as an argument
-if [ -z "$1" ]; then
-    echo "❌ ERROR: No scene name provided."
-    echo "Usage: ./run_pipeline.sh <scene_name>"
-    echo ""
-    echo "Available scenes in scenes.conf:"
-    for key in "${!SCENES[@]}"; do echo "  - ${key}"; done
-    exit 1
-fi
-
-SCENE_NAME=$1
-PANO_PROMPT="${SCENES[$SCENE_NAME]}"
-
-# Check if the provided scene name exists in the config file
-if [ -z "${PANO_PROMPT}" ]; then
-    echo "❌ ERROR: Scene '${SCENE_NAME}' not found in scenes.conf."
-    exit 1
-fi
 # ------------------------------
 
 # Define the scene name and prompt
 # SCENE_NAME="indoor_livingroom_compose"
 # PROMPT="A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus."
+# SCENE_NAME="cozy_reading_nook"
+# PROMPT="A 360 equirectangular photo of a cozy reading nook. A comfortable, dark green fabric armchair sits on a light oak wood floor. Next to it stands a simple, black metal floor lamp with a warm, glowing bulb. The background is a plain, off-white wall. The only light source is the lamp, creating a soft, intimate ambiance. photorealistic, sharp focus, 8k."
+# SCENE_NAME="centerpiece_living_room"
+# PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
+SCENE_NAME="centerpiece_living_room_wo_refinement"
+PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
@@ -87,7 +71,7 @@ docker-compose run --rm dreamscene360 \
     --output_dir "${DS360_SCENE_DIR}" \
     --api_key "${OPENAI_API_KEY}" \
     --self_refinement \
-    --num_prompt 2 \ 
+    --num_prompt 2 \
     --max_rounds 2
 
 test -f "${HOST_PANO}" || { echo "❌ Panorama generation failed"; exit 1; }
