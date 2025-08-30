@@ -15,11 +15,33 @@ else
     echo "❌ ERROR: .env file not found! Please create one with your OPENAI_API_KEY."
     exit 1
 fi
+
+# Load scene definitions from the configuration file
+source scenes.conf
+
+# Check if a scene name was provided as an argument
+if [ -z "$1" ]; then
+    echo "❌ ERROR: No scene name provided."
+    echo "Usage: ./run_pipeline.sh <scene_name>"
+    echo ""
+    echo "Available scenes in scenes.conf:"
+    for key in "${!SCENES[@]}"; do echo "  - ${key}"; done
+    exit 1
+fi
+
+SCENE_NAME=$1
+PANO_PROMPT="${SCENES[$SCENE_NAME]}"
+
+# Check if the provided scene name exists in the config file
+if [ -z "${PANO_PROMPT}" ]; then
+    echo "❌ ERROR: Scene '${SCENE_NAME}' not found in scenes.conf."
+    exit 1
+fi
 # ------------------------------
 
 # Define the scene name and prompt
-SCENE_NAME="indoor_livingroom_compose"
-PROMPT="A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus."
+# SCENE_NAME="indoor_livingroom_compose"
+# PROMPT="A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus."
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
