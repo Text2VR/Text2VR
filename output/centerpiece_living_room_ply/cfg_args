@@ -1,0 +1,1 @@
+Namespace(sh_degree=3, source_path='/workspace/DREAMSCENE360/data/centerpiece_living_room', model_path='/workspace/DREAMSCENE360/output/centerpiece_living_room_ply', images='images', resolution=-1, white_background=False, data_device='cuda', eval=False, pano_path='/workspace/DREAMSCENE360/data/centerpiece_living_room/inpainted_panorama.png')
