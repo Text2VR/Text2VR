@@ -85,11 +85,11 @@ docker-compose run --rm -e OPENAI_API_KEY \
     --output_dir "${SEG_OUT}" \
     --sam_checkpoint "${SAM_CKPT}" \
     --openai_api_key "${OPENAI_API_KEY}" \
-    --box_threshold 0.30 --text_threshold 0.25 \
-    --min_area_ratio 0.01 --max_area_ratio 0.40 \
-    --exclusion_use_mask true \
-    --exclusion_mask_dilate_px 12 \
-    --exclusion_overlap_drop 0.50
+    # --box_threshold 0.20 --text_threshold 0.15 \
+    # --min_area_ratio 0.005 --max_area_ratio 0.40 \
+    # --exclusion_use_mask true \
+    # --exclusion_mask_dilate_px 4 \
+    # --exclusion_overlap_drop 0.0
     # If your segmenter supports these, keep them; otherwise comment:
     # --max_prompts 5 \
     # --anchor_enable true
@@ -125,3 +125,10 @@ docker-compose run --rm dreamscene360 \
 echo -e "\n======================================================"
 echo "      PIPELINE FINISHED SUCCESSFULLY!  "
 echo "======================================================"
+
+
+docker-compose run --rm asset_seg \
+  python segment_panorama.py \
+    --panorama_path "/app/data/centerpiece_living_room/panorama.png" \
+    --output_dir "/app/output/centerpiece_living_room_masks" \
+    --sam_checkpoint "/app/checkpoints/sam_vit_h_4b8939.pth"
