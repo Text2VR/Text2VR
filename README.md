@@ -154,11 +154,11 @@ docker-compose run --rm dreamscene360 /bin/bash
 ```
 You will now be inside the container at `/workspace/dreamscene360_code`. See the `dreamscene360_service/README.md` for detailed instructions on manual execution.
 
-### 3.2. Working with the `segmentation_service`
+### 3.2. Working with the `ASSET_SEG`
 This is useful for testing or modifying the panorama segmentation logic.
 
 ```bash
 # Build and run the container, then drop into a bash shell
 docker-compose run --rm segmentation /bin/bash
 ```
-You will now be inside the container at `/app`. See the `segmentation_service/README.md` for detailed instructions on manual execution.
+You will now be inside the container at `/app`. See the `ASSET_SEG/README.md` for detailed instructions on manual execution.
