@@ -20,12 +20,13 @@ fi
 # Define the scene name and prompt
 # SCENE_NAME="indoor_livingroom_compose"
 # PROMPT="A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus."
-# SCENE_NAME="cozy_reading_nook"
-# PROMPT="A 360 equirectangular photo of a cozy reading nook. A comfortable, dark green fabric armchair sits on a light oak wood floor. Next to it stands a simple, black metal floor lamp with a warm, glowing bulb. The background is a plain, off-white wall. The only light source is the lamp, creating a soft, intimate ambiance. photorealistic, sharp focus, 8k."
 # SCENE_NAME="centerpiece_living_room"
 # PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
-SCENE_NAME="centerpiece_living_room_wo_refinement"
-PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
+# SCENE_NAME="centerpiece_living_room_wo_refinement"
+# PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
+SCENE_NAME="simple_bedroom"
+PROMPT="A 360 equirectangular photo of an extremely minimalist, tranquil bedroom interior. The room features only one single, modern wooden platform bed with a comfortable white mattress and soft, fluffy white bedding, centered against the back wall. Far away from the bed, on the opposite side of the room, there is one solitary small, simple square bedside table made of light, natural wood. The walls are plain, smooth, and painted in a very light, neutral beige color. The floor is covered with a uniform, light gray short-pile carpet. The space is completely devoid of any other furniture, decorations, lamps, windows, or architectural features like columns or doors. The room is softly and evenly illuminated by ambient light, creating a calm and expansive feeling with almost no shadows. photorealistic, 8k, ultra-sharp focus."
+
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
@@ -71,7 +72,7 @@ docker-compose run --rm dreamscene360 \
     --output_dir "${DS360_SCENE_DIR}" \
     --api_key "${OPENAI_API_KEY}" \
     --self_refinement \
-    --num_prompt 2 \
+    --num_prompt 1 \
     --max_rounds 2
 
 test -f "${HOST_PANO}" || { echo "❌ Panorama generation failed"; exit 1; }
@@ -105,15 +106,24 @@ docker-compose run --rm bg_inpaint \
     --image "${INPAINT_IN}" \
     --mask_dir "${INPAINT_MASK_DIR}" \
     --output "${INPAINT_OUT}" \
-    --prompt "clean empty interior background, seamless walls and floor, photorealistic, matching lighting, no new objects" \
-    --neg_prompt "sofa, couch, armchair, chair, bench, flat gray fill, plain color patch, smudged texture, repetitive tiling, text, watermark, logo, artifacts" \
+    --prompt "a clean empty room background, photorealistic, seamless texture, 8k, sharp focus" \
+    --neg_prompt "objects, furniture, sofa, chair, plant, lamp, table, blurry, hazy, watermark, text, signature" \
     --model_id "diffusers/stable-diffusion-xl-1.0-inpainting-0.1" \
-    --strength 0.88 --guidance 5.0 --steps 40 \
-    --dilate 18 --feather 8 --erase none --wrap_pad 256
+    --strength 0.95 \
+    --guidance 7.5 \
+    --steps 40 \
+    --seed 42 \
+    --wrap_pad "auto" \
+    --dilate "auto" \
+    --feather 1 \
+    --save_intermediate # Optional: for debugging
 
 test -f "${HOST_INPAINT}" || { echo "❌ Inpainting failed"; exit 1; }
 
-echo "================= STAGE 4: DREAMSCENE360 TRAIN ================="
+echo "================= STAGE 4: Trellis ================="
+
+
+echo "================= STAGE 5: DREAMSCENE360 TRAIN ================="
 docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
   python train.py \
@@ -122,10 +132,14 @@ docker-compose run --rm dreamscene360 \
     --pano_path "${DS360_SCENE_DIR}/inpainted_panorama.png" \
     --debug
 
+
+echo "================= STAGE 6: FlashSculptor ================="
+
+
+
 echo -e "\n======================================================"
 echo "      PIPELINE FINISHED SUCCESSFULLY!  "
 echo "======================================================"
-
 
 docker-compose run --rm asset_seg \
   python segment_panorama.py \
