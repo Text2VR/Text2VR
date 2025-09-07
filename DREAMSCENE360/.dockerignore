@@ -10,7 +10,6 @@ __pycache__/
 *.tmp
 .git/
 .gitignore
-.env
 self_refinement/
 candidates/
 *.png
