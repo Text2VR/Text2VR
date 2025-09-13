@@ -12,6 +12,10 @@ import sys
 #sys.path.append('Depth-Anything-TorchVersion')
 import os
 import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision("high")
+
 from utils.feature_extractor import get_Feature_from_DinoV2
 from random import randint
 from utils.loss_utils import l1_loss, ssim, cosine_similarity_loss

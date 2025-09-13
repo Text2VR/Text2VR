@@ -24,27 +24,32 @@ fi
 # PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
 # SCENE_NAME="centerpiece_living_room_wo_refinement"
 # PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
-SCENE_NAME="simple_bedroom"
-PROMPT="A 360 equirectangular photo of an extremely minimalist, tranquil bedroom interior. The room features only one single, modern wooden platform bed with a comfortable white mattress and soft, fluffy white bedding, centered against the back wall. Far away from the bed, on the opposite side of the room, there is one solitary small, simple square bedside table made of light, natural wood. The walls are plain, smooth, and painted in a very light, neutral beige color. The floor is covered with a uniform, light gray short-pile carpet. The space is completely devoid of any other furniture, decorations, lamps, windows, or architectural features like columns or doors. The room is softly and evenly illuminated by ambient light, creating a calm and expansive feeling with almost no shadows. photorealistic, 8k, ultra-sharp focus."
-
+# SCENE_NAME="simple_bedroom"
+# PROMPT="A 360 equirectangular photo of an extremely minimalist, tranquil bedroom interior. The room features only one single, modern wooden platform bed with a comfortable white mattress and soft, fluffy white bedding, centered against the back wall. Far away from the bed, on the opposite side of the room, there is one solitary small, simple square bedside table made of light, natural wood. The walls are plain, smooth, and painted in a very light, neutral beige color. The floor is covered with a uniform, light gray short-pile carpet. The space is completely devoid of any other furniture, decorations, lamps, windows, or architectural features like columns or doors. The room is softly and evenly illuminated by ambient light, creating a calm and expansive feeling with almost no shadows. photorealistic, 8k, ultra-sharp focus."
+SCENE_NAME="bedroom"
+PROMPT="A bedroom with a large bed and one beside table only with white wall and gray moder floor, photorealistic, 8k, sharp focus."
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
 HOST_SCENE_DIR="./DREAMSCENE360/data/${SCENE_NAME}"
-HOST_PANO="${HOST_SCENE_DIR}/panorama.png"
-HOST_INPAINT="${HOST_SCENE_DIR}/inpainted_panorama.png"
-HOST_MASK_DIR="./output/${SCENE_NAME}_masks/masks"   # <- produced by asset_seg
+HOST_PANO_IMAGE_PATH="${HOST_SCENE_DIR}/panorama.png" # Changed from diffusion_img.png for clarity
+HOST_MASK_DIR="./output/${SCENE_NAME}_masks"
+HOST_INPAINTED_PANO_PATH="${HOST_SCENE_DIR}/inpainted_panorama.png"
 
-# Container paths
-DS360_SCENE_DIR="/workspace/DREAMSCENE360/data/${SCENE_NAME}"
-SEG_PANO="/app/data/${SCENE_NAME}/panorama.png"
-SEG_OUT="/app/output/${SCENE_NAME}_masks"
-SAM_CKPT="/app/checkpoints/sam_vit_h_4b8939.pth"
+# Define a clean directory for the final training step
+HOST_INPAINTED_DIR_FOR_TRAINING="${HOST_SCENE_DIR}/for_training"
 
-# BG_INPAINT uses /workspace because of its compose mount
-INPAINT_IN="/workspace/data/${SCENE_NAME}/panorama.png"
-INPAINT_MASK_DIR="/workspace/output/${SCENE_NAME}_masks/masks"
-INPAINT_OUT="/workspace/data/${SCENE_NAME}/inpainted_panorama.png"
+# Container paths (do not change)
+CONTAINER_DS360_DATA_DIR="/workspace/DREAMSCENE360/data/${SCENE_NAME}"
+CONTAINER_DS360_OUTPUT_DIR="/workspace/DREAMSCENE360/output/${SCENE_NAME}_pano_gen"
+CONTAINER_SEG_PANO_PATH="/app/data/${SCENE_NAME}/panorama.png"
+CONTAINER_SEG_OUTPUT_DIR="/app/output/${SCENE_NAME}_masks"
+CONTAINER_SAM_CHECKPOINT="/app/checkpoints/sam_vit_h_4b8939.pth"
+CONTAINER_INPAINT_INPUT_PANO="/workspace/data/${SCENE_NAME}/panorama.png"
+CONTAINER_INPAINT_MASK_DIR="/workspace/output/${SCENE_NAME}_masks/masks"
+CONTAINER_INPAINT_OUTPUT_PANO="/workspace/data/${SCENE_NAME}/inpainted_panorama.png"
+CONTAINER_INPAINTED_DIR_FOR_TRAINING="/workspace/DREAMSCENE360/data/${SCENE_NAME}/for_training"
+
 
 # --- PIPELINE EXECUTION ---
 echo "======================================================"
@@ -56,7 +61,7 @@ echo ""
 
 # --------------------------------------------------------------
 ### ONLY needs to be done once, or when Dockerfile changes. ### 
-echo "================= BUILD ================="
+echo "================= BUILD (if needed) ================="
 echo "--> Building all services..."
 # docker-compose build                                                ### (optional)
 # --------------------------------------------------------------
@@ -69,7 +74,7 @@ docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
   python pano_generator.py \
     --text "$(cat ${HOST_SCENE_DIR}/prompt.txt)" \
-    --output_dir "${DS360_SCENE_DIR}" \
+    --output_dir "${CONTAINER_DS360_DATA_DIR}" \
     --api_key "${OPENAI_API_KEY}" \
     --self_refinement \
     --num_prompt 1 \
@@ -82,9 +87,9 @@ echo "================= STAGE 2: ASSET SEG ================="
 docker-compose run --rm -e OPENAI_API_KEY \
   asset_seg \
   python segment_panorama.py \
-    --panorama_path "${SEG_PANO}" \
-    --output_dir "${SEG_OUT}" \
-    --sam_checkpoint "${SAM_CKPT}" \
+    --panorama_path "${CONTAINER_SEG_PANO_PATH}" \
+    --output_dir "${CONTAINER_SEG_OUTPUT_DIR}" \
+    --sam_checkpoint "${CONTAINER_SAM_CHECKPOINT}" \
     --openai_api_key "${OPENAI_API_KEY}" \
     # --box_threshold 0.20 --text_threshold 0.15 \
     # --min_area_ratio 0.005 --max_area_ratio 0.40 \
@@ -103,9 +108,9 @@ fi
 echo "================= STAGE 3: BG INPAINT ================="
 docker-compose run --rm bg_inpaint \
   python /workspace/inpaint_panorama.py \
-    --image "${INPAINT_IN}" \
-    --mask_dir "${INPAINT_MASK_DIR}" \
-    --output "${INPAINT_OUT}" \
+    --image "${CONTAINER_INPAINT_INPUT_PANO}" \
+    --mask_dir "${CONTAINER_INPAINT_MASK_DIR}" \
+    --output "${CONTAINER_INPAINT_OUTPUT_PANO}" \
     --prompt "a clean empty room background, photorealistic, seamless texture, 8k, sharp focus" \
     --neg_prompt "objects, furniture, sofa, chair, plant, lamp, table, blurry, hazy, watermark, text, signature" \
     --model_id "diffusers/stable-diffusion-xl-1.0-inpainting-0.1" \
@@ -118,7 +123,7 @@ docker-compose run --rm bg_inpaint \
     --feather 1 \
     --save_intermediate # Optional: for debugging
 
-test -f "${HOST_INPAINT}" || { echo "❌ Inpainting failed"; exit 1; }
+test -f "${HOST_INPAINTED_PANO_PATH}" || { echo "❌ Inpainting failed"; exit 1; }
 
 echo "================= STAGE 4: Trellis ================="
 
@@ -126,7 +131,7 @@ echo "================= STAGE 4: Trellis ================="
 echo "================= STAGE 5: DREAMSCENE360 TRAIN ================="
 docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
-  python train.py \
+  python train_ds360_only.py \
     -s "${DS360_SCENE_DIR}" \
     -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply" \
     --pano_path "${DS360_SCENE_DIR}/inpainted_panorama.png" \

@@ -48,7 +48,7 @@ ALLOWED_LABELS = {
     "table", "coffee table", "side table",
     # decor / appliances
     "plant", "potted plant", "lamp", "floor lamp",
-    "cabinet", "shelf", "bookshelf", "tv", "television",
+    "cabinet", "shelf", "bookshelf", "tv", "television", "pillow", "rug",
 }
 BLACKLIST_LABELS = {
     # background-like categories we don't segment as assets
