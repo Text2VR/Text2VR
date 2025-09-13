@@ -26,8 +26,12 @@ fi
 # PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
 # SCENE_NAME="simple_bedroom"
 # PROMPT="A 360 equirectangular photo of an extremely minimalist, tranquil bedroom interior. The room features only one single, modern wooden platform bed with a comfortable white mattress and soft, fluffy white bedding, centered against the back wall. Far away from the bed, on the opposite side of the room, there is one solitary small, simple square bedside table made of light, natural wood. The walls are plain, smooth, and painted in a very light, neutral beige color. The floor is covered with a uniform, light gray short-pile carpet. The space is completely devoid of any other furniture, decorations, lamps, windows, or architectural features like columns or doors. The room is softly and evenly illuminated by ambient light, creating a calm and expansive feeling with almost no shadows. photorealistic, 8k, ultra-sharp focus."
-SCENE_NAME="bedroom"
-PROMPT="A bedroom with a large bed and one beside table only with white wall and gray moder floor, photorealistic, 8k, sharp focus."
+
+# SCENE_NAME="bedroom" <- good
+# PROMPT="A bedroom with a large bed and one beside table only with white wall and gray modern floor, photorealistic, 8k, sharp focus."
+SCENE_NAME="gallery_room2"
+#PROMPT="A gallery with two big art picture, white wall and white modern floor, flat lighting, photorealistic, 8k, sharp focus."
+PROMPT="A gallery with two big art pictures, white walls, and a white modern floor, lit by soft, even, diffuse light, creating no harsh shadows, photorealistic, 8k, sharp focus."
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
@@ -80,7 +84,7 @@ docker-compose run --rm dreamscene360 \
     --num_prompt 1 \
     --max_rounds 2
 
-test -f "${HOST_PANO}" || { echo "❌ Panorama generation failed"; exit 1; }
+test -f "${HOST_PANO_IMAGE_PATH}" || { echo "❌ Panorama generation failed"; exit 1; }
 
 echo "================= STAGE 2: ASSET SEG ================="
 # NOTE: We pass the key explicitly to guarantee GPT usage inside the container.
@@ -112,7 +116,7 @@ docker-compose run --rm bg_inpaint \
     --mask_dir "${CONTAINER_INPAINT_MASK_DIR}" \
     --output "${CONTAINER_INPAINT_OUTPUT_PANO}" \
     --prompt "a clean empty room background, photorealistic, seamless texture, 8k, sharp focus" \
-    --neg_prompt "objects, furniture, sofa, chair, plant, lamp, table, blurry, hazy, watermark, text, signature, pillow" \
+    --neg_prompt "objects, furniture, sofa, , picture, chair, plant, lamp, table, blurry, hazy, watermark, text, signature, pillow" \
     --model_id "diffusers/stable-diffusion-xl-1.0-inpainting-0.1" \
     --strength 0.95 \
     --guidance 7.5 \
@@ -129,15 +133,20 @@ echo "================= STAGE 4: Trellis ================="
 
 
 echo "================= STAGE 5: DREAMSCENE360 TRAIN ================="
-mkdir -p "${HOST_INPAINTED_DIR_FOR_TRAINING}"
-cp "${HOST_INPAINTED_PANO_PATH}" "${HOST_INPAINTED_DIR_FOR_TRAINING}/"
-echo "✅ Copied inpainted panorama to a dedicated training folder."
+# mkdir -p "${HOST_INPAINTED_DIR_FOR_TRAINING}"
+# cp "${HOST_INPAINTED_PANO_PATH}" "${HOST_INPAINTED_DIR_FOR_TRAINING}/"
+# echo "✅ Copied inpainted panorama to a dedicated training folder."
 
 docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
-  python train_ds360_only.py \
-    -s "${CONTAINER_INPAINTED_DIR_FOR_TRAINING}" \
-    -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply"
+  python train.py \
+    -s "${HOST_SCENE_DIR}" \
+    -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply" \
+    --pano_path "${HOST_PANO_IMAGE_PATH}" \
+    --no_perturb_loss
+#   python train_ds360_only.py \
+#     -s "${CONTAINER_INPAINTED_DIR_FOR_TRAINING}" \
+#     -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply"
 
 echo "================= STAGE 6: FlashSculptor ================="
 
