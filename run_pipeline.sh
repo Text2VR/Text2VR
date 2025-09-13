@@ -112,7 +112,7 @@ docker-compose run --rm bg_inpaint \
     --mask_dir "${CONTAINER_INPAINT_MASK_DIR}" \
     --output "${CONTAINER_INPAINT_OUTPUT_PANO}" \
     --prompt "a clean empty room background, photorealistic, seamless texture, 8k, sharp focus" \
-    --neg_prompt "objects, furniture, sofa, chair, plant, lamp, table, blurry, hazy, watermark, text, signature" \
+    --neg_prompt "objects, furniture, sofa, chair, plant, lamp, table, blurry, hazy, watermark, text, signature, pillow" \
     --model_id "diffusers/stable-diffusion-xl-1.0-inpainting-0.1" \
     --strength 0.95 \
     --guidance 7.5 \
@@ -129,14 +129,15 @@ echo "================= STAGE 4: Trellis ================="
 
 
 echo "================= STAGE 5: DREAMSCENE360 TRAIN ================="
+mkdir -p "${HOST_INPAINTED_DIR_FOR_TRAINING}"
+cp "${HOST_INPAINTED_PANO_PATH}" "${HOST_INPAINTED_DIR_FOR_TRAINING}/"
+echo "✅ Copied inpainted panorama to a dedicated training folder."
+
 docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
   python train_ds360_only.py \
-    -s "${DS360_SCENE_DIR}" \
-    -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply" \
-    --pano_path "${DS360_SCENE_DIR}/inpainted_panorama.png" \
-    --debug
-
+    -s "${CONTAINER_INPAINTED_DIR_FOR_TRAINING}" \
+    -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply"
 
 echo "================= STAGE 6: FlashSculptor ================="
 
@@ -145,9 +146,3 @@ echo "================= STAGE 6: FlashSculptor ================="
 echo -e "\n======================================================"
 echo "      PIPELINE FINISHED SUCCESSFULLY!  "
 echo "======================================================"
-
-docker-compose run --rm asset_seg \
-  python segment_panorama.py \
-    --panorama_path "/app/data/centerpiece_living_room/panorama.png" \
-    --output_dir "/app/output/centerpiece_living_room_masks" \
-    --sam_checkpoint "/app/checkpoints/sam_vit_h_4b8939.pth"
