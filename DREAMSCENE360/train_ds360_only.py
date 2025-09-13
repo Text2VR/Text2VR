@@ -12,6 +12,10 @@ import sys
 #sys.path.append('Depth-Anything-TorchVersion')
 import os
 import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision("high")
+
 from utils.feature_extractor import get_Feature_from_DinoV2
 from random import randint
 from utils.loss_utils import l1_loss, ssim, cosine_similarity_loss
@@ -271,7 +275,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 9_000, 10_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[5_000, 9_000, 10_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[5_000, 7_000, 9_000, 10_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)

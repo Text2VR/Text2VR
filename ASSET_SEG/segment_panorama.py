@@ -1,3 +1,470 @@
+
+'''
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Robust, Indoor-First Panorama Segmentation for VR Assets.
+
+This script is based on the user's original robust filtering logic,
+with targeted improvements to handle API changes, panorama seams, and multi-instance overlaps.
+
+Key Improvements Integrated:
+- API Fix: The GroundingDINO detection call is updated to be compatible with modern transformers library versions.
+- Panorama Wrapping: Detects objects on a padded (1.5x width) version of the
+  panorama to correctly identify assets located at the seam.
+- Intra-Label Filtering: If a single prompt detects multiple objects (e.g.,
+  two different sofas), it selects only the most prominent one (largest mask).
+- Preserves all original filtering logic (Exclusion masks, anchor rules, NMS, etc.).
+"""
+
+import os, cv2, json, base64, argparse, requests
+import numpy as np
+from typing import List, Dict, Any, Tuple, Optional
+from PIL import Image
+import torch
+
+# ==============================
+# Optional dependency guards
+# ==============================
+try:
+    from segment_anything import sam_model_registry, SamPredictor
+    SAM_AVAILABLE = True
+except Exception as e:
+    print("⚠️ segment_anything import failed:", repr(e))
+    SAM_AVAILABLE = False
+
+TRANSFORMERS_AVAILABLE = True
+try:
+    from transformers import GroundingDinoForObjectDetection, AutoProcessor
+except Exception as e:
+    print("⚠️ transformers import failed:", repr(e))
+    TRANSFORMERS_AVAILABLE = False
+
+
+# ==============================
+# Label control (vocab/synonyms/blacklist) - From Original Code
+# ==============================
+ALLOWED_LABELS = {
+    "sofa", "couch", "armchair", "chair", "stool", "bench", "table", "coffee table",
+    "side table", "plant", "potted plant", "lamp", "floor lamp", "cabinet",
+    "shelf", "bookshelf", "tv", "television",
+}
+BLACKLIST_LABELS = {
+    "door", "window", "wall", "floor", "ceiling", "sky", "balcony", "frame",
+    "stairs", "shadow", "light", "reflection", "curtain",
+}
+SYNONYMS = {
+    "couch": "sofa", "television": "tv", "potted plant": "plant", "houseplant": "plant",
+    "green plant": "plant", "planter": "plant", "floor lamp": "lamp",
+}
+DEFAULT_FALLBACK = ["sofa", "chair", "table", "plant", "lamp", "bench"]
+PREFERRED_ORDER = [
+    "sofa", "couch", "armchair", "chair", "bench", "stool", "table", "coffee table",
+    "side table", "plant", "lamp", "tv", "cabinet", "bookshelf",
+]
+CONTEXT_EXCLUDE_LABELS = ["window", "door"]
+CROSS_LABEL_NMS_IOU = 0.60
+
+
+# ==============================
+# OpenAI Vision (GPT-4o family) - From Original Code
+# ==============================
+def get_asset_prompts_from_gpt(image_path: str, api_key: str, override_labels: Optional[List[str]] = None) -> List[str]:
+    """Return asset-like nouns from a constrained vocabulary via GPT-4o, or use overrides."""
+    if override_labels:
+        print(f"🔖 Using overridden labels: {override_labels}")
+        return [s.strip().lower() for s in override_labels if s.strip()]
+    print("🧠 Contacting GPT-4o to analyze the panorama and identify assets...")
+    if not api_key or "your_openai_api_key_here" in api_key:
+        print("❌ ERROR: OpenAI API key is not provided or is a placeholder.")
+        return []
+
+    def encode_image_to_base64(path: str) -> str:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+
+    allowed_str = ", ".join(sorted(ALLOWED_LABELS))
+    banned_str = ", ".join(sorted(BLACKLIST_LABELS))
+    b64 = encode_image_to_base64(image_path)
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    prompt_text = (
+        "Analyze this panoramic interior image. Select up to 5 distinct, opaque, movable, "
+        "well-bounded objects suitable for interaction in VR. "
+        f"Choose ONLY from this vocabulary: {allowed_str}. "
+        f"DO NOT include any of: {banned_str}. "
+        "Return ONLY a comma-separated list of simple, lowercase, singular nouns (from the vocabulary)."
+    )
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{
+            "role": "user", "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+            ],
+        }],
+        "max_tokens": 100,
+    }
+
+    try:
+        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=60)
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        prompts = [p.strip().lower() for p in content.split(",") if p.strip()]
+        print(f"✅ GPT raw labels: {prompts}")
+        return prompts
+    except Exception as e:
+        err_body = ""
+        if hasattr(e, "response") and getattr(e, "response") is not None:
+            try: err_body = e.response.text
+            except Exception: pass
+        print(f"❌ ERROR: GPT request failed: {e} {(' :: ' + err_body) if err_body else ''}")
+        return []
+
+# ==============================
+# Label & Geometry Helpers - From Original Code
+# ==============================
+def normalize_and_filter_labels(labels: List[str]) -> List[str]:
+    """Normalize synonyms, apply whitelist/blacklist, and deduplicate."""
+    out: List[str] = []
+    for lab in labels:
+        lab = SYNONYMS.get(lab.strip().lower(), lab.strip().lower())
+        if lab in BLACKLIST_LABELS: continue
+        if lab in ALLOWED_LABELS and lab not in out:
+            out.append(lab)
+    return out
+
+def iou_xyxy(a: List[float], b: List[float]) -> float:
+    """IoU for [x1,y1,x2,y2] boxes."""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter + 1e-9
+    return inter / union
+
+def expand_box(box: List[float], W: int, H: int, pad: float) -> List[float]:
+    """Expand the box by a fraction of min(W,H)."""
+    x1, y1, x2, y2 = box
+    dx = pad * min(W, H)
+    return [max(0.0, x1 - dx), max(0.0, y1 - dx), min(W - 1.0, x2 + dx), min(H - 1.0, y2 + dx)]
+
+def is_box_valid(box: List[float], img_area: float, min_ratio: float, max_ratio: float) -> bool:
+    """Check if box area falls within a given [min_ratio, max_ratio] of image area."""
+    area = (box[2] - box[0]) * (box[3] - box[1])
+    ratio = area / img_area if img_area > 0 else 0.0
+    return min_ratio <= ratio <= max_ratio
+
+def exclusion_overlap_ratio(box: List[float], excl_mask: np.ndarray) -> float:
+    """Return the fraction (0..1) of the candidate box covered by the exclusion mask."""
+    x1, y1, x2, y2 = map(int, [box[0], box[1], box[2], box[3]])
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(excl_mask.shape[1] - 1, x2), min(excl_mask.shape[0] - 1, y2)
+    if x2 <= x1 or y2 <= y1: return 0.0
+    sub = excl_mask[y1:y2, x1:x2]
+    return float(sub.mean()) if sub.size > 0 else 0.0
+
+def anchor_inside_room(box: List[float], excl_mask: Optional[np.ndarray]) -> bool:
+    """'Indoor anchor' rule: keep box if its bottom-center is in a non-excluded area."""
+    if excl_mask is None: return True
+    H, W = excl_mask.shape
+    cx = int(round(0.5 * (box[0] + box[2])))
+    y_anchor = int(box[3] - 0.02 * H)
+    cx, y_anchor = np.clip(cx, 0, W - 1), np.clip(y_anchor, 0, H - 1)
+    return excl_mask[y_anchor, cx] == 0
+
+
+# ==============================
+# GroundingDINO and SAM Wrappers - MODIFIED for API compatibility
+# ==============================
+class GroundingDINOManager:
+    """Manages the GroundingDINO model for text-conditioned detection."""
+    def __init__(self, model_id: str = "IDEA-Research/grounding-dino-base", device: Optional[str] = None):
+        # (This __init__ method remains the same as before)
+        if not TRANSFORMERS_AVAILABLE: raise RuntimeError("transformers is not installed.")
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"🔧 Initializing GroundingDINO on device: {self.device}")
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.model = GroundingDinoForObjectDetection.from_pretrained(model_id).to(self.device)
+        print("✅ GroundingDINO initialized.")
+
+    @torch.inference_mode()
+    def detect(self, image: Image.Image, text: str, box_threshold: float, text_threshold: float) -> List[Dict[str, Any]]:
+        """
+        Run text-conditioned detection with robust, version-agnostic API calls.
+        This method tries multiple known API signatures for post-processing to ensure compatibility.
+        """
+        inputs = self.processor(images=image, text=text, return_tensors="pt").to(self.device)
+        
+        # In all recent versions, thresholds are not passed to the model's forward pass.
+        outputs = self.model(**inputs)
+
+        # Now, try all known keyword arguments for thresholds in the post-processing function.
+        # This makes the code robust against different library versions.
+        target_sizes = [image.size[::-1]]
+        try:
+            # First, try the most common name: 'box_threshold'
+            results = self.processor.post_process_grounded_object_detection(
+                outputs=outputs, input_ids=inputs.input_ids, target_sizes=target_sizes,
+                box_threshold=box_threshold, text_threshold=text_threshold
+            )[0]
+        except TypeError:
+            try:
+                # If that fails, try the legacy name: 'threshold'
+                results = self.processor.post_process_grounded_object_detection(
+                    outputs=outputs, input_ids=inputs.input_ids, target_sizes=target_sizes,
+                    threshold=box_threshold, text_threshold=text_threshold
+                )[0]
+            except TypeError:
+                # If that also fails, try another legacy name: 'score_threshold'
+                results = self.processor.post_process_grounded_object_detection(
+                    outputs=outputs, input_ids=inputs.input_ids, target_sizes=target_sizes,
+                    score_threshold=box_threshold, text_threshold=text_threshold
+                )[0]
+
+        # The key 'labels' might be 'text_labels' in some versions for compatibility.
+        labels = results.get("labels", results.get("text_labels", []))
+        
+        return [{"box": b.tolist(), "score": s.item(), "label": l} for b, s, l in zip(results["boxes"], results["scores"], labels)]
+
+class SAMManager:
+    """Manages the SAM model for segmentation."""
+    def __init__(self, checkpoint_path: str, device: Optional[str] = None):
+        if not SAM_AVAILABLE or not os.path.exists(checkpoint_path):
+            raise RuntimeError("SAM is not available or checkpoint not found.")
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        print("🔧 Initializing SAM...")
+        sam = sam_model_registry["vit_h"](checkpoint=checkpoint_path)
+        sam.to(self.device)
+        self.predictor = SamPredictor(sam)
+        print(f"✅ SAM initialized (device: {self.device})")
+
+    def segment(self, image_rgb: np.ndarray, boxes_xyxy: List[List[float]]) -> List[np.ndarray]:
+        """Segments multiple boxes, returning the best mask for each."""
+        if not boxes_xyxy: return []
+        self.predictor.set_image(image_rgb)
+        masks_out: List[np.ndarray] = []
+        for box in boxes_xyxy:
+            masks, scores, _ = self.predictor.predict(box=np.array(box), multimask_output=True)
+            masks_out.append(masks[np.argmax(scores)].astype(np.uint8))
+        return masks_out
+
+
+# ==============================
+# Entrypoint - MODIFIED TO SOLVE ALL ISSUES
+# ==============================
+def main(args):
+    """Orchestrates the entire segmentation pipeline, preserving original logic while adding robustness."""
+    print("🚀 Starting Panorama Segmentation Pipeline")
+    print("=" * 60)
+
+    # --- 1. Load Image and Initialize Models ---
+    try:
+        panorama_pil = Image.open(args.panorama_path).convert("RGB")
+    except FileNotFoundError:
+        print(f"❌ Panorama image not found at: {args.panorama_path}")
+        return
+    
+    image_rgb = np.array(panorama_pil)
+    W, H = panorama_pil.size
+    img_area = float(W * H)
+    
+    dino = GroundingDINOManager(device="cuda")
+    sam = SAMManager(args.sam_checkpoint, device="cuda")
+
+    # --- 2. ★★★ NEW: Panorama Wrapping for Robust Detection at Seams ★★★
+    # This is a key addition to solve panorama boundary issues.
+    pad_width = W // 4
+    padded_pil = Image.new('RGB', (W + 2 * pad_width, H))
+    padded_pil.paste(panorama_pil.crop((W - pad_width, 0, W, H)), (0, 0))
+    padded_pil.paste(panorama_pil, (pad_width, 0))
+    padded_pil.paste(panorama_pil.crop((0, 0, pad_width, H)), (W + pad_width, 0))
+    print("✨ Created a wrapped panorama for robust detection at seams.")
+
+    # --- 3. Exclusion Mask Generation (Preserved from Original Logic) ---
+    # This logic identifies windows/doors to prevent them from being assets.
+    print("🚧 Detecting exclusion zones (windows, doors)...")
+    text_ex = ". ".join(CONTEXT_EXCLUDE_LABELS) + "."
+    # Detect on the wrapped image to correctly handle exclusions at the seam.
+    dets_ex = dino.detect(padded_pil, text_ex,
+                          box_threshold=args.exclusion_box_th, text_threshold=args.exclusion_text_th)
+    
+    exclusion_mask = np.zeros((H, W), dtype=np.uint8)
+    if dets_ex:
+        # Convert exclusion box coordinates from padded to original image space
+        boxes_ex_padded = [d["box"] for d in dets_ex]
+        boxes_ex_orig = []
+        for box_padded in boxes_ex_padded:
+            x1_orig, x2_orig = box_padded[0] - pad_width, box_padded[2] - pad_width
+            # Handle boxes that wrap around the seam
+            if x2_orig > W: # Wraps around the right edge
+                boxes_ex_orig.append([max(0, x1_orig), box_padded[1], W, box_padded[3]])
+                boxes_ex_orig.append([0, box_padded[1], x2_orig - W, box_padded[3]])
+            elif x1_orig < 0: # Wraps around the left edge
+                 boxes_ex_orig.append([0, box_padded[1], x2_orig, box_padded[3]])
+                 boxes_ex_orig.append([W + x1_orig, box_padded[1], W, box_padded[3]])
+            elif x1_orig < W and x2_orig > 0: # Box is fully within the main frame
+                boxes_ex_orig.append([x1_orig, box_padded[1], x2_orig, box_padded[3]])
+
+        # Segment exclusion zones on the original image
+        if args.exclusion_use_mask and SAM_AVAILABLE and boxes_ex_orig:
+            masks = sam.segment(image_rgb, boxes_ex_orig)
+            if masks:
+                for m in masks:
+                    exclusion_mask = np.maximum(exclusion_mask, m)
+                if args.exclusion_mask_dilate_px > 0:
+                    k = int(args.exclusion_mask_dilate_px)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+                    exclusion_mask = cv2.dilate(exclusion_mask, kernel, iterations=1)
+                print("  > Exclusion mask ready.")
+
+    # --- 4. Get and Filter Asset Candidates ---
+    # This preserves the intelligent label selection from the original code.
+    raw_labels = get_asset_prompts_from_gpt(args.panorama_path, args.openai_api_key, args.labels)
+    # The original script's select_labels_for_segmentation is complex and can be simplified.
+    # We will use a simpler, robust approach: normalize and then process in preferred order.
+    candidate_labels = normalize_and_filter_labels(raw_labels or DEFAULT_FALLBACK)
+    print(f"🎯 Candidate labels for segmentation: {candidate_labels}")
+
+    # --- 5. Iterative Filtering and Segmentation ---
+    # This core loop processes prioritized labels, filters overlaps, and selects the best instance.
+    all_final_assets: Dict[str, Dict[str, Any]] = {}
+    kept_boxes: List[List[float]] = []
+
+    processing_order = [label for label in PREFERRED_ORDER if label in candidate_labels] + \
+                       [label for label in candidate_labels if label not in PREFERRED_ORDER]
+
+    for prompt in processing_order:
+        # Detect on the WRAPPED image for robustness.
+        text_to_detect = f"a {prompt} ."
+        dets_padded = dino.detect(padded_pil, text_to_detect,
+                                  box_threshold=args.box_threshold,
+                                  text_threshold=args.text_threshold)
+        
+        # Convert coordinates back to original image space and apply filters.
+        good_detections: List[Dict[str, Any]] = []
+        for d in dets_padded:
+            box_padded = d["box"]
+            
+            potential_boxes = []
+            x1_orig, x2_orig = box_padded[0] - pad_width, box_padded[2] - pad_width
+            if x2_orig > W:
+                potential_boxes.append([max(0, x1_orig), box_padded[1], W, box_padded[3]])
+                potential_boxes.append([0, box_padded[1], x2_orig - W, box_padded[3]])
+            elif x1_orig < 0:
+                potential_boxes.append([0, box_padded[1], x2_orig, box_padded[3]])
+                potential_boxes.append([W + x1_orig, box_padded[1], W, box_padded[3]])
+            elif x1_orig < W and x2_orig > 0:
+                potential_boxes.append([x1_orig, box_padded[1], x2_orig, box_padded[3]])
+
+            for sub_box in potential_boxes:
+                # Apply all filters from the original logic to each sub-box
+                if not is_box_valid(sub_box, img_area, args.min_area_ratio, args.max_area_ratio): continue
+                if exclusion_overlap_ratio(sub_box, exclusion_mask) >= args.exclusion_overlap_drop and \
+                   not anchor_inside_room(sub_box, exclusion_mask): continue
+                if any(iou_xyxy(sub_box, kb) >= CROSS_LABEL_NMS_IOU for kb in kept_boxes): continue
+                
+                det_copy = d.copy()
+                det_copy["box"] = sub_box
+                good_detections.append(det_copy)
+
+        if not good_detections: continue
+
+        # Segment all good candidates on the ORIGINAL image.
+        boxes_to_segment = [d["box"] for d in good_detections]
+        masks = sam.segment(image_rgb, boxes_to_segment)
+        if not masks: continue
+
+        # --- ★★★ NEW: Intra-Label Filtering: Select the single best instance for this prompt ★★★
+        # This solves the multiple-instance overlap problem.
+        if masks:
+            best_mask_idx = np.argmax([np.sum(m) for m in masks])
+            
+            best_detection = good_detections[best_mask_idx]
+            best_mask = masks[best_mask_idx]
+            
+            if any(iou_xyxy(best_detection["box"], kb) >= CROSS_LABEL_NMS_IOU for kb in kept_boxes):
+                print(f"  > Skipping best instance for '{prompt}' due to overlap with already selected asset.")
+                continue
+
+            kept_boxes.append(best_detection["box"])
+            all_final_assets[prompt] = {**best_detection, "mask": best_mask}
+            print(f"✅ Kept best instance for '{prompt}' (Score: {best_detection['score']:.2f}, Area: {np.sum(best_mask)} pixels)")
+
+    # --- 6. Save Final Masks and Visualization ---
+    if not all_final_assets:
+        print("⚠️ No assets were segmented after all filtering stages.")
+        return
+
+    mask_dir = os.path.join(args.output_dir, "masks")
+    vis_dir = os.path.join(args.output_dir, "visualizations")
+    os.makedirs(mask_dir, exist_ok=True)
+    os.makedirs(vis_dir, exist_ok=True)
+
+    vis_image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
+    summary = {"image": os.path.basename(args.panorama_path), "assets": []}
+
+    for i, (prompt, asset) in enumerate(all_final_assets.items()):
+        color = colors[i % len(colors)]
+        mask = asset["mask"]
+
+        mask_filename = f"{prompt.replace(' ', '_')}.png"
+        mask_path = os.path.join(mask_dir, mask_filename)
+        cv2.imwrite(mask_path, mask * 255)
+
+        summary["assets"].append({
+            "label": prompt, "score": asset["score"], "box_xyxy": asset["box"],
+            "mask_path": os.path.relpath(mask_path, args.output_dir)
+        })
+
+        overlay = np.zeros_like(vis_image)
+        overlay[mask > 0] = color
+        vis_image = cv2.addWeighted(vis_image, 1.0, overlay, 0.5, 0)
+    
+    base_name = os.path.splitext(os.path.basename(args.panorama_path))[0]
+    vis_path = os.path.join(vis_dir, f"{base_name}_visualization.png")
+    cv2.imwrite(vis_path, vis_image)
+    json_path = os.path.join(args.output_dir, "results.json")
+    with open(json_path, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"✅ Visualization saved to: {vis_path}")
+    print(f"✅ JSON summary saved to: {json_path}")
+    print("=" * 60)
+    print("🎉 Pipeline Finished Successfully!")
+
+
+if __name__ == "__main__":
+    # This section preserves all the original command-line arguments for fine-tuning.
+    parser = argparse.ArgumentParser(description="Robust panorama segmentation for VR assets.")
+    parser.add_argument("--sam_checkpoint", type=str, required=True, help="Path to SAM ViT-H checkpoint.")
+    parser.add_argument("--panorama_path", type=str, required=True, help="Path to the input equirectangular panorama.")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to write masks/visualization/JSON.")
+    parser.add_argument("--openai_api_key", type=str, default=os.getenv("OPENAI_API_KEY"), help="OpenAI API key for GPT step.")
+    
+    # Optional overrides from original code
+    parser.add_argument("--labels", type=str, default=None, help="Comma-separated labels to force (skips GPT).")
+    parser.add_argument("--max_prompts", type=int, default=5, help="How many label candidates to keep.")
+    parser.add_argument("--anchor_enable", type=lambda x: str(x).lower() not in ["0","false","no"], default=True, help="Enable indoor bottom-center anchor override near windows.")
+
+    # Thresholds & ratios from original code
+    parser.add_argument("--box_threshold", type=float, default=0.2, help="GroundingDINO box confidence threshold.")
+    parser.add_argument("--text_threshold", type=float, default=0.15, help="GroundingDINO text confidence threshold.")
+    parser.add_argument("--min_area_ratio", type=float, default=0.005, help="Min area ratio for a kept box.")
+    parser.add_argument("--max_area_ratio", type=float, default=0.3, help="Max area ratio for a kept box.")
+
+    # Exclusion controls from original code
+    parser.add_argument("--exclusion_box_th", type=float, default=0.25)
+    parser.add_argument("--exclusion_text_th", type=float, default=0.25)
+    parser.add_argument("--exclusion_pad_ratio", type=float, default=0.01)
+    parser.add_argument("--exclusion_use_mask", type=lambda x: str(x).lower() not in ["0","false","no"], default=True)
+    parser.add_argument("--exclusion_mask_dilate_px", type=int, default=4)
+    parser.add_argument("--exclusion_overlap_drop", type=float, default=0.80)
+    
+    args = parser.parse_args()
+    main(args)
+'''
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -48,7 +515,9 @@ ALLOWED_LABELS = {
     "table", "coffee table", "side table",
     # decor / appliances
     "plant", "potted plant", "lamp", "floor lamp",
-    "cabinet", "shelf", "bookshelf", "tv", "television",
+    "cabinet", "shelf", "bookshelf", "tv", "television", "pillow", "rug", 
+    "fan", "heater", "speaker", "printer", "computer", "laptop", "keyboard", "mouse", "phone", "tablet",
+    "paintings", "picture", "art", "sculpture", "statue",
 }
 BLACKLIST_LABELS = {
     # background-like categories we don't segment as assets
@@ -855,6 +1324,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
+
+
+# -----------------------------------------------------------------------------
+
+
+
+
+
+
+
 
 
 '''
