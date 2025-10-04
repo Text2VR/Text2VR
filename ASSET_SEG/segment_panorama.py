@@ -518,6 +518,7 @@ ALLOWED_LABELS = {
     "cabinet", "shelf", "bookshelf", "tv", "television", "pillow", "rug", 
     "fan", "heater", "speaker", "printer", "computer", "laptop", "keyboard", "mouse", "phone", "tablet",
     "paintings", "picture", "art", "sculpture", "statue",
+    "tree", "bush", "flower"
 }
 BLACKLIST_LABELS = {
     # background-like categories we don't segment as assets

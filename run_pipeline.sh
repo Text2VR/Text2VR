@@ -18,8 +18,8 @@ fi
 # ------------------------------
 
 # Define the scene name and prompt
-SCENE_NAME="park1" 
-PROMPT="A beautiful park with trees, flowers, and a walking path, photorealistic, 8k, sharp focus"
+SCENE_NAME="park" 
+PROMPT="A beautiful park with trees and one benche, one table, and a walking path, photorealistic, 8k, sharp focus"
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
@@ -128,10 +128,13 @@ echo "================= STAGE 5: DREAMSCENE360 TRAIN ================="
 docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
   python train.py \
-    -s "${HOST_SCENE_DIR}" \
+    -s "${CONTAINER_DS360_DATA_DIR}" \
     -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply" \
-    --pano_path "${HOST_PANO_IMAGE_PATH}" \
-    --no_perturb_loss
+    --pano_path "/workspace/DREAMSCENE360/data/${SCENE_NAME}/inpainted_panorama.png" \
+    --no_perturb_loss \
+    --iterations 7000 \
+    --test_iterations 7000 \
+    --save_iterations 5000 7000
 #   python train_ds360_only.py \
 #     -s "${CONTAINER_INPAINTED_DIR_FOR_TRAINING}" \
 #     -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply"
