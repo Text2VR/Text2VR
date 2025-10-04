@@ -366,7 +366,9 @@ def main(args):
     print("*********")
     print(f"x_range_scene: {x_range}, y_range_scene: {y_range}")
     ## calculate depth
+    # 파노라마 깊이 데이터 로드 (Text2VR/DREAMSCENE360에서 생성)
     depth_array = np.load(f"results/{args.task_name}/depth/2DImage_pred.npy")
+    print(f"Loaded panorama depth data: {depth_array.shape}")
 
     mask_image = Image.open(f"results/{args.task_name}/background/mask_0.png").convert("L")
     mask_array = np.array(mask_image) 
@@ -457,6 +459,42 @@ def main(args):
 
     merged_vertices = merge_plys(source_ply, target_ply, scale_objects, translation_x, translation_y, translation_z)
     save_ply(output_filename, merged_vertices)
+    
+    # Scene 결합 정보 저장
+    scene_info = {
+        'scale_objects': float(scale_objects),
+        'scale_scene': float(scale_scene),
+        'translation': {
+            'x': float(translation_x),
+            'y': float(translation_y),
+            'z': float(translation_z)
+        },
+        'depth_ratio': float(depth_ratio_objects_to_background),
+        'final_ratios': {
+            'x': float(final_ratio_x),
+            'y': float(final_ratio_y)
+        },
+        'scene_bounds': {
+            'x_min': float(x_min_scene),
+            'x_max': float(x_max_scene),
+            'y_min': float(y_min_scene),
+            'y_max': float(y_max_scene),
+            'z_min': float(z_min_scene),
+            'z_max': float(z_max_scene)
+        },
+        'scene_center': {
+            'x': float(x_center),
+            'y': float(y_center),
+            'z': float(z_center)
+        }
+    }
+    
+    # JSON 파일로 저장
+    scene_info_path = f"./results/{args.task_name}/scene_info.json"
+    with open(scene_info_path, 'w') as f:
+        json.dump(scene_info, f, indent=2)
+    
+    print(f"Scene info saved to: {scene_info_path}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Scene Combination')

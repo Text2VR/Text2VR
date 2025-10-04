@@ -10,7 +10,8 @@ import torch.nn.functional as F
 import torchvision.transforms as transforms
 from scipy.optimize import minimize
 from trellis.representations.gaussian.gaussian_model import Gaussian 
-from trellis.utils import render_utils 
+from trellis.utils import render_utils
+import json 
 
 def get_angles_from_index(index, interval):
     y_steps = 360 // interval
@@ -178,15 +179,17 @@ def main():
 
     args = parser.parse_args()
 
-    input_folder = os.path.join("../results", args.task_name, "Single3D")
-    ref_folder = os.path.join("../results", args.task_name, "Single")
-    output_folder = os.path.join("../results", args.task_name, "Single3DN")
+    input_folder = os.path.join("results", args.task_name, "Single3D")
+    ref_folder = os.path.join("results", args.task_name, "Single")
+    output_folder = os.path.join("results", args.task_name, "Single3DN")
 
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     ply_files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.endswith(('ply'))]
     
+    # 회전 정보 저장을 위한 딕셔너리
+    rotation_info = {}
 
     for ply_file in ply_files:
         # rotate and render images
@@ -233,6 +236,34 @@ def main():
         output_ply_path = os.path.join(output_folder, os.path.basename(input_ply))
         print(input_ply, output_ply_path)
         rotate_ply(input_ply, output_ply_path, x_final, y_final)
+        
+        # 최종 유사도 점수 계산
+        gaussian_copy = copy.deepcopy(gaussian_obj)
+        gaussian_copy.rotate_around_x_axis(x_final)
+        gaussian_copy.rotate_around_y_axis(180+y_final)
+        outputs = {'gaussian': [gaussian_copy]}
+        images, extrinsics, intrinsics = render_utils.render_single(outputs['gaussian'][0])
+        rendered_img = images[0]
+        rendered_img_pil = Image.fromarray(rendered_img)
+        img_tensor = preprocess_image(rendered_img_pil)
+        img_feature = get_feature_vector(dino_model, img_tensor)
+        final_similarity = compute_similarity(ref_feature, img_feature.unsqueeze(0))
+        
+        # 회전 정보 저장
+        rotation_info[ply_name] = {
+            'x_angle': float(x_final),
+            'y_angle': float(y_final),
+            'input_file': input_ply,
+            'output_file': output_ply_path,
+            'similarity_score': float(final_similarity.item())
+        }
+    
+        # 회전 정보를 JSON 파일로 저장
+        rotation_info_path = os.path.join("results", args.task_name, "rotation_info.json")
+    with open(rotation_info_path, 'w') as f:
+        json.dump(rotation_info, f, indent=2)
+    
+    print(f"Rotation info saved to: {rotation_info_path}")
 
 
 if __name__ == '__main__':

@@ -97,7 +97,9 @@ def select(args):
         points_cord = np.zeros((500, 3))
         points_cord[:, :2] = float_coords
 
+        # 파노라마 깊이 데이터 로드 (Text2VR/DREAMSCENE360에서 생성)
         depth_data = np.load(os.path.join("results", args.task_name, "depth", "2DImage_pred.npy"))
+        print(f"Loaded panorama depth data: {depth_data.shape}")
         box = [item['box'] for item in data['mask'] if item['value'] == num+1]
         # print(box.shape)
         label = [item['label'] for item in data['mask'] if item['value'] == num+1]

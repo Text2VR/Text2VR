@@ -313,6 +313,30 @@ def main():
     combined_mesh = combine_meshes_with_properties(meshes)
     
     save_ply(f"./results/{args.task_name}/output.ply", combined_mesh)
+    
+    # 변환 정보 저장
+    transform_info = {
+        'scale_factors': scale_factors,
+        'translations': translations.tolist(),
+        'rotation_angles': rotation_angles.tolist(),
+        'objects': []
+    }
+    
+    for i, file_path in enumerate(ply_files):
+        obj_name = os.path.splitext(os.path.basename(file_path))[0]
+        transform_info['objects'].append({
+            'name': obj_name,
+            'scale_factor': float(scale_factors[i]),
+            'translation': translations[i].tolist(),
+            'rotation': rotation_angles[i].tolist() if i < len(rotation_angles) else [0.0, 0.0, 0.0]
+        })
+    
+    # JSON 파일로 저장
+    transform_info_path = f"./results/{args.task_name}/transform_info.json"
+    with open(transform_info_path, 'w') as f:
+        json.dump(transform_info, f, indent=2)
+    
+    print(f"Transform info saved to: {transform_info_path}")
 
 if __name__ == "__main__":
     main()

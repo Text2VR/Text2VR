@@ -28,6 +28,8 @@ if __name__ == '__main__':
     pipeline.enable_model_cpu_offload()
     pipeline.enable_xformers_memory_efficient_attention()
 
+    sam_dir = os.path.join("./results", args.task_name, "SAM")
+
     input_dir = os.path.join("./results", args.task_name, "Inpaint")
     output_dir = os.path.join("./results", args.task_name, "Single")
     json_path = os.path.join("./results", args.task_name, "SAM", "label.json")
@@ -49,7 +51,7 @@ if __name__ == '__main__':
         label = item["label"]
         print(f"Value: {value}, Label: {label}")
 
-        init_image = Image.open(os.path.join(input_dir, f"bbox_image_{value}.jpg"))
+        init_image = Image.open(os.path.join(sam_dir, f"bbox_image_{value}.jpg"))
         init_image = init_image.convert("RGB")
         init_image_np = np.array(init_image)
 
