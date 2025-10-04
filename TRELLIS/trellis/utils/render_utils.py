@@ -11,35 +11,98 @@ from ..representations import Octree, Gaussian, MeshExtractResult
 from ..modules import sparse as sp
 from .random_utils import sphere_hammersley_sequence, get_icosphere_spherical_coords
 
+def yaw_pitch_r_fov_to_extrinsics_intrinsics(yaws, pitchs, rs, fovs, resolution=1024, device=None):
+    """
+    yaws, pitchs : deg (list or scalar)
+    rs, fovs     : list or scalar (fovs in deg)
+    resolution   : int (생성할 렌더 이미지의 가로/세로, intrinsics 계산에 사용)
+    """
+    import math
+    device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def yaw_pitch_r_fov_to_extrinsics_intrinsics(yaws, pitchs, rs, fovs):
+    # 리스트/스칼라 정규화
     is_list = isinstance(yaws, list)
     if not is_list:
-        yaws = [yaws]
+        yaws   = [yaws]
         pitchs = [pitchs]
     if not isinstance(rs, list):
         rs = [rs] * len(yaws)
     if not isinstance(fovs, list):
         fovs = [fovs] * len(yaws)
+
     extrinsics = []
     intrinsics = []
-    for yaw, pitch, r, fov in zip(yaws, pitchs, rs, fovs):
-        fov = torch.deg2rad(torch.tensor(float(fov))).cuda()
-        yaw = torch.tensor(float(yaw)).cuda()
-        pitch = torch.tensor(float(pitch)).cuda()
-        orig = torch.tensor([
+
+    # 미리 width/height 텐서 준비 (utils3d 신버전 호환용)
+    _W = torch.tensor(float(resolution), device=device, dtype=torch.float32)
+    _H = torch.tensor(float(resolution), device=device, dtype=torch.float32)
+
+    for yaw_deg, pitch_deg, r, fov_deg in zip(yaws, pitchs, rs, fovs):
+        # deg -> rad (torch)
+        fov  = torch.deg2rad(torch.tensor(float(fov_deg),  device=device, dtype=torch.float32))
+        yaw  = torch.deg2rad(torch.tensor(float(yaw_deg),   device=device, dtype=torch.float32))
+        pitch= torch.deg2rad(torch.tensor(float(pitch_deg), device=device, dtype=torch.float32))
+
+        # 카메라 위치
+        orig = torch.stack([
             torch.sin(yaw) * torch.cos(pitch),
             torch.cos(yaw) * torch.cos(pitch),
             torch.sin(pitch),
-        ]).cuda() * r
-        extr = utils3d.torch.extrinsics_look_at(orig, torch.tensor([0, 0, 0]).float().cuda(), torch.tensor([0, 0, 1]).float().cuda())
-        intr = utils3d.intrinsics_from_fov(fov, fov)
+        ], dim=0).float().to(device) * float(r)
+
+        # extrinsics (utils3d 함수 그대로 사용)
+        extr = utils3d.torch.extrinsics_look_at(
+            orig,
+            torch.tensor([0, 0, 0], device=device, dtype=torch.float32),
+            torch.tensor([0, 0, 1], device=device, dtype=torch.float32)
+        )
+
+        # intrinsics (utils3d 버전별 시그니처 대응 + 폴백)
+        try:
+            # 신버전: width/height 필수, 키워드 인자
+            intr = utils3d.intrinsics_from_fov(
+                fov_x=fov, fov_y=fov, width=_W, height=_H
+            )
+            intr = intr.to(device)
+        except TypeError:
+            # 구버전: 포지셔널 인자 허용
+           intr = utils3d.intrinsics_from_fov(fov, fov, _W, _H).to(device)
         extrinsics.append(extr)
         intrinsics.append(intr)
+
     if not is_list:
         extrinsics = extrinsics[0]
         intrinsics = intrinsics[0]
     return extrinsics, intrinsics
+
+# def yaw_pitch_r_fov_to_extrinsics_intrinsics(yaws, pitchs, rs, fovs):
+#     is_list = isinstance(yaws, list)
+#     if not is_list:
+#         yaws = [yaws]
+#         pitchs = [pitchs]
+#     if not isinstance(rs, list):
+#         rs = [rs] * len(yaws)
+#     if not isinstance(fovs, list):
+#         fovs = [fovs] * len(yaws)
+#     extrinsics = []
+#     intrinsics = []
+#     for yaw, pitch, r, fov in zip(yaws, pitchs, rs, fovs):
+#         fov = torch.deg2rad(torch.tensor(float(fov))).cuda()
+#         yaw = torch.tensor(float(yaw)).cuda()
+#         pitch = torch.tensor(float(pitch)).cuda()
+#         orig = torch.tensor([
+#             torch.sin(yaw) * torch.cos(pitch),
+#             torch.cos(yaw) * torch.cos(pitch),
+#             torch.sin(pitch),
+#         ]).cuda() * r
+#         extr = utils3d.torch.extrinsics_look_at(orig, torch.tensor([0, 0, 0]).float().cuda(), torch.tensor([0, 0, 1]).float().cuda())
+#         intr = utils3d.intrinsics_from_fov(fov, fov)
+#         extrinsics.append(extr)
+#         intrinsics.append(intr)
+#     if not is_list:
+#         extrinsics = extrinsics[0]
+#         intrinsics = intrinsics[0]
+#     return extrinsics, intrinsics
 
 
 def render_frames(sample, extrinsics, intrinsics, options={}, colors_overwrite=None, verbose=True, **kwargs):

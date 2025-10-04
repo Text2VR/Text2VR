@@ -128,7 +128,9 @@ RUN pip install mmcv-full -f https://download.openmmlab.com/mmcv/dist/cu121/torc
 RUN pip install -r /app/Flash-Sculptor/requirements.txt || echo "Some packages failed to install, continuing..."
 
 # Install additional required packages
-RUN pip install git+https://github.com/EasternJournalist/utils3d
+# RUN pip install git+https://github.com/EasternJournalist/utils3d
+RUN pip install git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
+
 
 # Install ml-depth-pro dependencies
 RUN pip install timm==0.9.12 pillow_heif
