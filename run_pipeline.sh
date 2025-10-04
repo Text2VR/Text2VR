@@ -21,7 +21,7 @@ fi
 # SCENE_NAME="park" 
 # PROMPT="A beautiful park with trees and one benche, one table, and a walking path, photorealistic, 8k, sharp focus"
 SCENE_NAME="living_room_woSink" 
-PROMPT="A modern living room with a sofa, a coffee table, a plant, and a window showing a cityscape."
+PROMPT="A modern living room with a sofa, a small coffee table, a small potted plant, and a window showing a cityscape, no carpet, no lighting fixtures."
 
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---

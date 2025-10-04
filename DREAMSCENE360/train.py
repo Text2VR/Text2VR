@@ -43,6 +43,32 @@ except ImportError:
 # === add near imports ===
 import torch.nn.functional as F
 
+# add once (top-level)
+def floor_normal_loss(z, band=0.15):
+    # z: [H,W] depth
+    H, W = z.shape
+    
+    dzdx = 0.5 * (z[:, 2:] - z[:, :-2])        # [H, W-2]
+    dzdy = 0.5 * (z[2:, :] - z[:-2, :])        # [H-2, W]
+    
+    # approx normal in camera space (assuming camera-space unit vectors are sufficient)
+    nx = -dzdx[1:-1, :]                        # [H-2, W-2]
+    ny = -dzdy[:, 1:-1]                        # [H-2, W-2]
+    nz = torch.ones_like(nx)                   # [H-2, W-2]  # constant normal z-component (approx) 
+    
+    n = torch.stack([nx, ny, nz], dim=-1)      # [H-2, W-2, 3]
+    n = n / (n.norm(dim=-1, keepdim=True) + 1e-6)
+
+    # Nadir(=bottom) band mask - bottom 15% of the image 
+    Hc, Wc = n.shape[:2]
+    hband = max(1, int(band * Hc))
+    mask = torch.zeros((Hc, Wc), dtype=torch.bool, device=z.device)
+    mask[-hband:, :] = True
+    
+    # maximize cos: n[..., up_axis-1].abs() -> minimize (1 - cos) 
+    return (1.0 - n[..., 2].abs()[mask]).mean()
+
+
 # === add util funcs (top-level) ===
 def ssi_depth_loss(pred_z, gt_z, mask=None, eps=1e-6):
     if mask is None:
@@ -153,6 +179,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         depth_weight = 0.20
         loss_depth_main = ssi_depth_loss(rendered_depth, gt_depth) + 0.2 * grad_alignment_loss(rendered_depth, gt_depth)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + depth_weight * loss_depth_main
+        
+        floor_w = 0.03  # adjust between 0.02~0.05
+        loss = loss + floor_w * floor_normal_loss(rendered_depth)
         # === end of replace ===
 
         loss_feature = torch.tensor(0).cuda() 
@@ -195,6 +224,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             if torch.isnan(loss_perturbation_depth).sum() == 0:
                 loss += 0.5 * depth_weight * loss_perturbation_depth
+            loss += 0.5 * floor_w * floor_normal_loss(perturbation_rendered_depth)
             # === end of fix perturbation block ===
 
             pred_feature = get_Feature_from_DinoV2(perturbation_image)

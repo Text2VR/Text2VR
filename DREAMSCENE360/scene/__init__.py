@@ -82,12 +82,21 @@ def erp_raylen_to_view_z(dist_erp, R_wc, fx, fy, cx, cy, w, h):
     d_world = torch.einsum('ij,hwj->hwi', R_wc, d_cam)                       # [h,w,3]
 
     # World dir -> ERP coords (normalized to [-1,1])
+    '''
     lam = torch.atan2(d_world[..., 2], d_world[..., 0])                      # [-pi, pi]
     phi = torch.asin(torch.clamp(d_world[..., 1], -1, 1))                    # [-pi/2, pi/2]
     u_norm = lam / np.pi                                                     # [-1,1]
     v_norm = -2.0 * phi / np.pi                                             # [-1,1] top is -1
 
     grid = torch.stack([u_norm, v_norm], dim=-1).unsqueeze(0)                # [1,h,w,2]
+    '''
+    # after (alpha=atan2(y,x), beta=asin(z))
+    alpha = torch.atan2(d_world[..., 1], d_world[..., 0])   # [-pi, pi]
+    beta  = torch.asin(torch.clamp(d_world[..., 2], -1, 1)) # [-pi/2, pi/2]
+    u_norm = alpha / np.pi
+    v_norm = -2.0 * beta / np.pi
+    grid = torch.stack([u_norm, v_norm], dim=-1).unsqueeze(0)
+    
     # Sample ray-length s from ERP
     s = torch.nn.functional.grid_sample(
         dist_erp[None, None, ...], grid, mode='bilinear',
@@ -114,6 +123,63 @@ def pcd_from_depths(pano_img, distances, height, width, source_path):
     pts = pano_dirs * distances.squeeze()[..., None]                                   # no rescaling
     pts = pts.cpu().numpy().reshape(-1, 3)
     return pts
+
+# --- add: robust floor-plane correction (nadir band) ---
+def _fit_plane_svd(pts):
+    # pts: (N, 3) numpy array
+    if pts.shape[0] < 3:
+        # too few points to fit a plane -> return horizontal plane
+        return np.array([0., 0., 1.], dtype=np.float32), 0.0
+    
+    c = pts.mean(axis=0, keepdims=True)
+    U,S,Vt = np.linalg.svd(pts - c, full_matrices=False)
+    n = Vt[-1]                  # plane normal
+    d = -np.dot(n, c[0])        # n·x + d = 0
+    if n[2] < 0:  # make normal roughly +z/up
+        n = -n; d = -d
+    return n.astype(np.float32), float(d)
+
+@torch.no_grad()
+def enforce_floor_plane(dist_erp, pano_dirs, beta_thresh_deg=35, inlier_tol=0.06):
+    """
+    dist_erp: [H,W] torch (ray-length along dirs)
+    pano_dirs: [H,W,3] torch (ERP ray directions, z가 up)
+    1) nadir band(downward directions) plane fitting
+    2) inlier re-fitting for robustness (>500 inliers)
+    """
+    H, W = dist_erp.shape
+    dirs = pano_dirs.reshape(-1, 3).cpu().numpy()
+    dist = dist_erp.reshape(-1).cpu().numpy()
+
+    # nadir band mask: z < -sin(beta) (= downward)
+    th = np.deg2rad(beta_thresh_deg)
+    mask = dirs[:, 2] < -np.sin(th)
+    if mask.sum() < 500:  # too few points to fit a plane -> skip
+        return dist_erp
+
+    # nadir band 3D points (= noisy floor points) for fitting only
+    pts = dirs[mask] * dist[mask, None]
+    # SVD plane fit (least squares) to all nadir band points first (robustness)
+    n, d = _fit_plane_svd(pts)
+
+    # inlier re-fitting for robustness (>500 inliers) with relative tolerance in ray-length space (RANSAC-like)
+    denom = (dirs[mask] @ n)
+    denom[np.abs(denom) < 1e-6] = 1e-6
+    s_on_plane = (-d) / denom
+    err = np.abs(s_on_plane - dist[mask]) / (np.maximum(dist[mask], 1e-6))
+    inl = err < inlier_tol
+    if inl.sum() > 500:
+        n, d = _fit_plane_svd(pts[inl])
+
+    # correct all points below the plane
+    denom = (dirs @ n)
+    denom[np.abs(denom) < 1e-6] = 1e-6
+    s_all = (-d) / denom
+    dist_fixed = dist.copy()
+    dist_fixed[mask] = s_all[mask]
+
+    return torch.from_numpy(dist_fixed.reshape(H, W)).to(dist_erp.device, dist_erp.dtype)
+# -------------------------------------------------------
 
 
 def getNerfppNorm(cam_info):
@@ -199,27 +265,32 @@ def get_info_from_params(source_path, pano_img, distances, rot_w2c, fx, fy, cx, 
             # cam_info.depth = z_depth_np                                             # === NEW: pass z-depth to downstream
             cam_infos_unsorted.append(cam_info)
 
-            # --- Perturbation views: rotation-only jitter, zero translation ---
+            # --- Perturbation views: rotation-only jitter, zero translation + small translation jitter ---
             R1 = _jitter_R(R_wc, yaw_deg=2.0, pitch_deg=1.0)
             R2 = _jitter_R(R_wc, yaw_deg=3.0, pitch_deg=2.0)
             R3 = _jitter_R(R_wc, yaw_deg=5.0, pitch_deg=3.0)
+            
+            t_eps = 0.03  # about 3cm, adjust 0.02~0.05 if needed
+            T1 = T + np.random.uniform(-t_eps, t_eps, 3).astype(np.float32)
+            T2 = T + np.random.uniform(-t_eps, t_eps, 3).astype(np.float32)
+            T3 = T + np.random.uniform(-t_eps, t_eps, 3).astype(np.float32)
 
             cam_perturbation_info = CameraInfo(
-                uid=uid, R=R1, T=T, FovY=fovy, FovX=fovx, image=img,
+                uid=uid, R=R1, T=T1, FovY=fovy, FovX=fovx, image=img,
                 image_path=image_path, image_name=image_name, width=w, height=h,
                 depth=z_depth_np                                                    # === NEW: pass z-depth to downstream
             )
             # cam_perturbation_info.depth = z_depth_np                                 # same z
 
             cam_perturbation_info_stage2 = CameraInfo(
-                uid=uid, R=R2, T=T, FovY=fovy, FovX=fovx, image=img,
+                uid=uid, R=R2, T=T2, FovY=fovy, FovX=fovx, image=img,
                 image_path=image_path, image_name=image_name, width=w, height=h,
                 depth=z_depth_np                                                    # === NEW: pass z-depth to downstream
             )
             # cam_perturbation_info_stage2.depth = z_depth_np
 
             cam_perturbation_info_stage3 = CameraInfo(
-                uid=uid, R=R3, T=T, FovY=fovy, FovX=fovx, image=img,
+                uid=uid, R=R3, T=T3, FovY=fovy, FovX=fovx, image=img,
                 image_path=image_path, image_name=image_name, width=w, height=h,
                 depth=z_depth_np                                                    # === NEW: pass z-depth to downstream   
             )
@@ -407,6 +478,11 @@ class Scene:
             geo_predictor = PanoGeoPredictor()
             height, width, _ = img.shape
             distances, rot_w2c, fx, fy, cx, cy, pers_imgs = geo_predictor(img)   # distances is ERP ray-length
+            
+            # NEW: floor-plane correction (use z-up in pano_dirs)
+            pano_dirs = img_coord_to_pano_direction(img_coord_from_hw(height, width)).cuda()  # [H,W,3]
+            distances = enforce_floor_plane(distances.squeeze(), pano_dirs).unsqueeze(0)
+            
             pts = pcd_from_depths(img, distances, height, width, args.source_path)
 
             print("Saving data for future use...")
