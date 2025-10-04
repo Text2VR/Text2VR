@@ -130,14 +130,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-        rendered_depth = render_pkg["depth"]
-        gt_depth = torch.tensor(viewpoint_cam.depth_image).cuda()
+        # rendered_depth = render_pkg["depth"]
+        # gt_depth = torch.tensor(viewpoint_cam.depth_image).cuda()
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
         # === replace depth loss block in the main loop ===
         rendered_depth = render_pkg["depth"]
-        gt_depth = torch.tensor(viewpoint_cam.depth_image).to(image.device)  # z-depth
+        # --- ADD: force to [H, W] and dtype align ---
+        if rendered_depth.dim() == 3 and rendered_depth.shape[0] == 1:
+            rendered_depth = rendered_depth[0]
+        gt_depth = torch.tensor(viewpoint_cam.depth_image, device=image.device, dtype=rendered_depth.dtype)
+        # --------------------------------------------
+        # gt_depth = torch.tensor(viewpoint_cam.depth_image).to(image.device)  # z-depth
 
         # old:
         # depth_weight = 0.05
@@ -171,6 +176,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             perturbation_render_pkg = render(perturbation_viewpoint_cam, gaussians, pipe, bg)
             perturbation_image, perturbation_rendered_depth= perturbation_render_pkg["render"], perturbation_render_pkg["depth"]
+            # --- ADD: force to [H, W] and dtype align ---
+            if perturbation_rendered_depth.dim() == 3 and perturbation_rendered_depth.shape[0] == 1:
+                perturbation_rendered_depth = perturbation_rendered_depth[0]
+            # --------------------------------------------
             
             # === fix perturbation block ===
             # old bugged lines:
