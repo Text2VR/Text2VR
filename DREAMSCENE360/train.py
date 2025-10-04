@@ -38,6 +38,38 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
+
+
+# === add near imports ===
+import torch.nn.functional as F
+
+# === add util funcs (top-level) ===
+def ssi_depth_loss(pred_z, gt_z, mask=None, eps=1e-6):
+    if mask is None:
+        mask = torch.isfinite(gt_z)
+    p = pred_z[mask].reshape(-1)
+    g = gt_z[mask].reshape(-1)
+    if p.numel() == 0:
+        return torch.tensor(0.0, device=pred_z.device)
+    # scale & shift align: argmin_{a,b} || a p + b - g ||^2
+    a = torch.std(g) / (torch.std(p) + eps)
+    b = torch.mean(g) - a * torch.mean(p)
+    p_aligned = a * pred_z + b
+    return (p_aligned[mask] - gt_z[mask]).abs().mean()
+
+def grad_alignment_loss(pred_z, gt_z):
+    # edge-aware: Sobel-like finite differences
+    def dxdy(x):
+        dx = x[:, :, 1:] - x[:, :, :-1]
+        dy = x[:, 1:, :] - x[:, :-1, :]
+        return dx, dy
+    px, py = dxdy(pred_z[None])
+    gx, gy = dxdy(gt_z[None])
+    return (px - gx).abs().mean() + (py - gy).abs().mean()
+
+
+
+
 # ★★★ MODIFICATION 1: Add 'no_perturb_loss' to the function signature ★★★
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from,
              api_key, self_refinement, num_prompt, max_rounds, pano_path=None, no_perturb_loss=False):
@@ -103,10 +135,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
-        depth_weight = 0.05
-        loss_depth = depth_weight * (1 - pearson_corrcoef(rendered_depth.reshape(-1, 1)[:, 0], - gt_depth.reshape(-1, 1)[:, 0]))
-        
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + depth_weight * loss_depth
+        # === replace depth loss block in the main loop ===
+        rendered_depth = render_pkg["depth"]
+        gt_depth = torch.tensor(viewpoint_cam.depth_image).to(image.device)  # z-depth
+
+        # old:
+        # depth_weight = 0.05
+        # loss_depth = depth_weight * (1 - pearson_corrcoef(rendered_depth.reshape(-1,1)[:,0], -gt_depth.reshape(-1,1)[:,0]))
+        # loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + depth_weight * loss_depth
+
+        # new:
+        depth_weight = 0.20
+        loss_depth_main = ssi_depth_loss(rendered_depth, gt_depth) + 0.2 * grad_alignment_loss(rendered_depth, gt_depth)
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + depth_weight * loss_depth_main
+        # === end of replace ===
+
         loss_feature = torch.tensor(0).cuda() 
         loss_perturbation_depth = torch.tensor(0).cuda() 
 
@@ -129,11 +172,22 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             perturbation_render_pkg = render(perturbation_viewpoint_cam, gaussians, pipe, bg)
             perturbation_image, perturbation_rendered_depth= perturbation_render_pkg["render"], perturbation_render_pkg["depth"]
             
-            pred_depth = estimate_depth(perturbation_image)
-            loss_perturbation_depth = (1 - pearson_corrcoef(rendered_depth.reshape(-1, 1)[:, 0], - gt_depth.reshape(-1, 1)[:, 0]))
+            # === fix perturbation block ===
+            # old bugged lines:
+            # pred_depth = estimate_depth(perturbation_image)
+            # loss_perturbation_depth = (1 - pearson_corrcoef(rendered_depth.reshape(-1, 1)[:, 0], - gt_depth.reshape(-1, 1)[:, 0]))
+            # if torch.isnan(loss_perturbation_depth).sum() == 0:
+            #     loss += depth_weight * loss_perturbation_depth
+
+            # correct:
+            pred_depth = estimate_depth(perturbation_image).to(image.device)     # estimated z-depth(or if inverse -> transform z inside)
+            loss_perturbation_depth = ssi_depth_loss(perturbation_rendered_depth, pred_depth) \
+                                    + 0.2 * grad_alignment_loss(perturbation_rendered_depth, pred_depth)
+
             if torch.isnan(loss_perturbation_depth).sum() == 0:
-                loss += depth_weight * loss_perturbation_depth
-            
+                loss += 0.5 * depth_weight * loss_perturbation_depth
+            # === end of fix perturbation block ===
+
             pred_feature = get_Feature_from_DinoV2(perturbation_image)
             ref_image = perturbation_viewpoint_cam.original_image.cuda()
             ref_feature = get_Feature_from_DinoV2(ref_image)
@@ -153,7 +207,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration == opt.iterations:
                 progress_bar.close()
 
-            training_report(tb_writer, iteration, Ll1, loss_feature, loss_depth, loss, l1_loss, loss_perturbation_depth, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            # training_report(tb_writer, iteration, Ll1, loss_feature, loss_depth, loss, l1_loss, loss_perturbation_depth, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, Ll1, loss_feature, loss_depth_main, loss, l1_loss, loss_perturbation_depth, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
             if (iteration in saving_iterations):
                 print(f"\n[ITER {iteration}] Saving Gaussians")
                 scene.save(iteration)

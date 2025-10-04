@@ -12,7 +12,7 @@
 import os
 import sys
 from PIL import Image
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
@@ -34,6 +34,7 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
+    depth: Optional[np.ndarray] = None 
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -242,9 +243,9 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
-                           perturbation_cameras_stage1=perturbation_cam_infos_stage1, ###
-                           perturbation_cameras_stage2=perturbation_cam_infos_stage2, ###
-                           perturbation_cameras_stage3=perturbation_cam_infos_stage3, ###
+                           perturbation_cameras_stage1=[], # perturbation_cam_infos_stage1, ###
+                           perturbation_cameras_stage2=[], # perturbation_cam_infos_stage2, ###
+                           perturbation_cameras_stage3=[], # perturbation_cam_infos_stage3, ###
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
     return scene_info

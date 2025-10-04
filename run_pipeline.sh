@@ -20,8 +20,8 @@ fi
 # Define the scene name and prompt
 # SCENE_NAME="park" 
 # PROMPT="A beautiful park with trees and one benche, one table, and a walking path, photorealistic, 8k, sharp focus"
-SCENE_NAME="living_room" 
-PROMPT="A modern living room with a sofa, a coffee table, a plant, and a window showing a cityscape, photorealistic, 8k, sharp focus"
+SCENE_NAME="living_room_woSink" 
+PROMPT="A modern living room with a sofa, a coffee table, a plant, and a window showing a cityscape."
 
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---

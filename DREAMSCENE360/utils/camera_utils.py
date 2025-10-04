@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+import cv2 as cv
 from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
@@ -52,8 +52,22 @@ def loadCam(args, id, cam_info, resolution_scale):
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
     gt_image = resized_image_rgb[:3, ...]
-    depth = estimate_depth(gt_image.cuda()).cpu().numpy() ### midas
+    # depth = estimate_depth(gt_image.cuda()).cpu().numpy() ### midas
     # depth = depth_anything(gt_image.cuda(), 'vits', model = model).cpu().numpy()
+
+    # === Prefer depth from CameraInfo (provided by Scene). Fallback to estimator. ===
+    if hasattr(cam_info, "depth") and cam_info.depth is not None:
+        depth = cam_info.depth.astype(np.float32)
+        # Resize depth to match the possibly downscaled gt_image
+        if depth.shape != (gt_image.shape[1], gt_image.shape[2]):
+            depth = cv.resize(
+                depth,
+                (gt_image.shape[2], gt_image.shape[1]),
+                interpolation=cv.INTER_LINEAR
+            ).astype(np.float32)
+    else:
+        depth = estimate_depth(gt_image.cuda()).cpu().numpy().astype(np.float32)
+    # === end of prefer depth from CameraInfo ===
     loaded_mask = None
 
     if resized_image_rgb.shape[1] == 4:
