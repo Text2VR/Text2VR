@@ -86,8 +86,10 @@ FROM python-env as app
 # Set working directory
 WORKDIR /app
 
-# Clone Flash-Sculptor repository
-RUN git clone https://github.com/YujiaHu1109/Flash-Sculptor.git /app/Flash-Sculptor
+# Clone Flash-Sculptor repository (suyeon branch)
+RUN git clone https://github.com/Text2VR/Text2VR.git /app/Flash-Sculptor && \
+    cd /app/Flash-Sculptor && \
+    git checkout suyeon
 
 # Copy requirements.txt and install dependencies
 COPY requirements.txt /app/Flash-Sculptor/requirements.txt
