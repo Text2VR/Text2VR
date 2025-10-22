@@ -1,15 +1,14 @@
 version: '3.8'
 
 services:
-  # Service for running the original DreamScene360 training
-  dreamscene360:
-    build:
-      context: ./DREAMSCENE360
-      dockerfile: Dockerfile
-    container_name: text2vr_dreamscene360
+  # Panorama Generation API
+  panorama-api:
+    image: text2vr-dreamscene360:latest
+    container_name: text2vr_panorama_api
     working_dir: /workspace/DREAMSCENE360
+    ports:
+      - "8001:8001"
     environment:
-      # Pass the API key from the host shell environment to the container
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - NVIDIA_VISIBLE_DEVICES=all
     ipc: host
@@ -21,18 +20,21 @@ services:
               count: 1            
               capabilities: [gpu]
     volumes:
-      # DreamScene360 code + outputs + checkpoints
       - ./DREAMSCENE360:/workspace/DREAMSCENE360
       - ./output:/workspace/DREAMSCENE360/output
+      - ./stitch_output:/workspace/DREAMSCENE360/stitch_diffusion/output
       - ./pre_checkpoints:/workspace/DREAMSCENE360/pre_checkpoints
+      - ./data:/workspace/data
+    command: ["bash", "/workspace/DREAMSCENE360/start_api.sh"]
+    restart: unless-stopped
 
-  # Service for running the new panorama segmentation pipelin
-  asset_seg:
-    build:
-      context: ./ASSET_SEG
-      dockerfile: Dockerfile
-    container_name: text2vr_asset_seg
+  # Segmentation API
+  segmentation-api:
+    image: text2vr-asset_seg:latest
+    container_name: text2vr_segmentation_api
     working_dir: /app
+    ports:
+      - "8002:8002"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - NVIDIA_VISIBLE_DEVICES=all
@@ -50,41 +52,48 @@ services:
               count: 1            
               capabilities: [gpu]
     volumes:
-      # share outputs, checkpoints, and the panorama data folder
-      - ./output:/app/output
+      - ./masking_output:/app/masking_output
       - ./pre_checkpoints:/app/checkpoints
       - ./DREAMSCENE360/data:/app/data
-      - ./ASSET_SEG/segment_panorama.py:/app/segment_panorama.py:ro
+      - ./data:/app/host_data
+      #- ./ASSET_SEG/segment_panorama.py:/app/segment_panorama.py:ro
       - ./cache/hf:/root/.cache/huggingface
       - ./cache/torch:/root/.cache/torch
+    command: ["bash", "/app/start_api.sh"]
+    restart: unless-stopped
 
-  # Service for running the background inpainting pipeline
-  bg_inpaint:
-      build:
-        context: ./BG_INPAINT
-        dockerfile: Dockerfile
-      container_name: text2vr_bg_inpaint
-      working_dir: /workspace
-      environment:
-        - HF_HOME=/workspace/.cache/huggingface
-        - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
-        - NVIDIA_VISIBLE_DEVICES=all
-        - HF_HOME=/root/.cache/huggingface
-        - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
-        - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
-        - DIFFUSERS_CACHE=/root/.cache/huggingface/diffusers
-        - TORCH_HOME=/root/.cache/torch
-      ipc: host
-      deploy:
-        resources:
-          reservations:
-            devices:
-              - driver: nvidia
-                count: 1            
-                capabilities: [gpu]
-      volumes:
-        - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
-        - ./DREAMSCENE360/data:/workspace/data
-        - ./output:/workspace/output
-        - ./cache/hf:/root/.cache/huggingface
-        - ./cache/torch:/root/.cache/torch
+  # Background Inpainting API
+  inpainting-api:
+    image: text2vr-bg_inpaint:latest
+    container_name: text2vr_inpainting_api
+    working_dir: /workspace
+    ports:
+      - "8003:8003"
+    environment:
+      - HF_HOME=/workspace/.cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - DIFFUSERS_CACHE=/root/.cache/huggingface/diffusers
+      - TORCH_HOME=/root/.cache/torch
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1            
+              capabilities: [gpu]
+    volumes:
+      - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
+      - ./BG_INPAINT/api_server.py:/workspace/api_server.py:ro
+      - ./BG_INPAINT/start_api.sh:/workspace/start_api.sh:ro
+      - ./data:/workspace/data
+      - ./inpainted_pano:/workspace/inpainted_pano
+      - ./masking_output:/workspace/masking_output
+      - ./cache/hf:/root/.cache/huggingface
+      - ./cache/torch:/root/.cache/torch
+    command: ["bash", "/workspace/start_api.sh"]
+    restart: unless-stopped

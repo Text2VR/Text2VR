@@ -1,0 +1,30 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "table": [
+      {
+        "label": "table",
+        "score": 0.666049599647522,
+        "box": [
+          315.5507507324219,
+          274.9406433105469,
+          390.1345520019531,
+          321.1883239746094
+        ],
+        "mask_saved_as": "masks/table.png"
+      },
+      {
+        "label": "table",
+        "score": 0.30133625864982605,
+        "box": [
+          590.05859375,
+          328.620361328125,
+          705.8851318359375,
+          371.15057373046875
+        ],
+        "mask_saved_as": "masks/table.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

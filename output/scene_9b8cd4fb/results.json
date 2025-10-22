@@ -1,0 +1,78 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "plant": [
+      {
+        "label": "plant",
+        "score": 0.7774214744567871,
+        "box": [
+          573.3685913085938,
+          184.60060119628906,
+          676.3423461914062,
+          361.8936767578125
+        ],
+        "mask_saved_as": "masks/plant.png"
+      }
+    ],
+    "armchair": [
+      {
+        "label": "armchair",
+        "score": 0.5439745187759399,
+        "box": [
+          43.938941955566406,
+          293.1935119628906,
+          220.05316162109375,
+          406.6955261230469
+        ],
+        "mask_saved_as": "masks/armchair.png"
+      },
+      {
+        "label": "armchair",
+        "score": 0.2744355797767639,
+        "box": [
+          23.867115020751953,
+          297.86224365234375,
+          93.04476928710938,
+          357.05047607421875
+        ],
+        "mask_saved_as": "masks/armchair.png"
+      }
+    ],
+    "side table": [
+      {
+        "label": "side table",
+        "score": 0.3631224036216736,
+        "box": [
+          0.5596466064453125,
+          309.5977478027344,
+          32.761898040771484,
+          367.8930358886719
+        ],
+        "mask_saved_as": "masks/side_table.png"
+      },
+      {
+        "label": "side table",
+        "score": 0.32620614767074585,
+        "box": [
+          147.9202423095703,
+          333.8891906738281,
+          237.3851776123047,
+          390.1485290527344
+        ],
+        "mask_saved_as": "masks/side_table.png"
+      },
+      {
+        "label": "side table",
+        "score": 0.2184462994337082,
+        "box": [
+          207.74928283691406,
+          267.692138671875,
+          572.5004272460938,
+          423.426025390625
+        ],
+        "mask_saved_as": "masks/side_table.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

@@ -61,19 +61,31 @@ echo "--> Building all services..."
 # docker-compose build                                                ### (optional)
 # --------------------------------------------------------------
 
-echo "================= STAGE 1: PANORAMA GEN ================="
+echo "================= STAGE 1: PANORAMA GEN (API) ================="
 mkdir -p "${HOST_SCENE_DIR}"
 echo "${PROMPT}" > "${HOST_SCENE_DIR}/prompt.txt"
 
-docker-compose run --rm dreamscene360 \
-  micromamba run -n dev \
-  python pano_generator.py \
-    --text "$(cat ${HOST_SCENE_DIR}/prompt.txt)" \
-    --output_dir "${DS360_SCENE_DIR}" \
-    --api_key "${OPENAI_API_KEY}" \
-    --self_refinement \
-    --num_prompt 1 \
-    --max_rounds 2
+# Start panorama API service if not running
+echo "🔄 Ensuring panorama-api service is running..."
+docker compose up -d panorama-api
+
+# Wait for service to be ready
+echo "⏳ Waiting for API service to start..."
+for i in {1..30}; do
+  if curl -s http://localhost:8001/health > /dev/null; then
+    echo "✅ API service is ready"
+    break
+  fi
+  if [ $i -eq 30 ]; then
+    echo "❌ API service failed to start"
+    exit 1
+  fi
+  sleep 2
+done
+
+# Call API to generate panorama
+echo "🎨 Calling panorama generation API..."
+python3 api_client.py "${PROMPT}" "${SCENE_NAME}" true 1 2
 
 test -f "${HOST_PANO}" || { echo "❌ Panorama generation failed"; exit 1; }
 

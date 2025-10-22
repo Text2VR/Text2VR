@@ -1,0 +1,19 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "tv": [
+      {
+        "label": "tv",
+        "score": 0.8872214555740356,
+        "box": [
+          554.253662109375,
+          214.43569946289062,
+          666.4757080078125,
+          297.1603088378906
+        ],
+        "mask_saved_as": "masks/tv.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}
