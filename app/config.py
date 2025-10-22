@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     DREAMSCENE_API_URL: str
     SEGMENTATION_API_URL: str = "http://localhost:8002"
     INPAINTING_API_URL: str = "http://localhost:8003"
+    TRELLIS_API_URL: str = "http://localhost:8004"
     OPENAI_API_KEY: str
     OPENAI_BASE_URL: Optional[str] = None
     OPENAI_MODEL: str

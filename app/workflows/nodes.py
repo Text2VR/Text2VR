@@ -16,6 +16,7 @@ from ..config import settings
 from .api_client import PanoramaAPIClient
 from .segmentation_client import SegmentationAPIClient
 from .inpainting_client import InpaintingAPIClient
+from .trellis_client import TrellisAPIClient
 from .states import WorkflowState
 from .asset_cropper import crop_assets_with_transparency
 from ..services.task_manager import task_manager
@@ -324,6 +325,132 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
             "segmentation_data": {},
             "messages": [
                 HumanMessage(content=f"Segmentation failed: {str(exc)}")
+            ],
+        }
+
+
+def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
+    """Generate 3D GLB assets from cropped segmentation images using TRELLIS API."""
+
+    import subprocess
+    import time
+
+    cropped_assets = state.get("cropped_assets", {})
+
+    if not cropped_assets:
+        print("⚠️ No cropped assets found, skipping 3D generation")
+        return {
+            **state,
+            "asset_3d_paths": {},
+            "messages": [
+                HumanMessage(content="No assets to convert to 3D")
+            ],
+        }
+
+    try:
+        print(f"🎲 Starting 3D asset generation for {len(cropped_assets)} assets")
+
+        # TRELLIS 컨테이너 시작 (이미 실행 중이면 무시됨)
+        try:
+            subprocess.run(
+                ["docker", "start", "text2vr_trellis_api"],
+                capture_output=True,
+                timeout=10
+            )
+            print("🚀 TRELLIS container started")
+            # 파이프라인 로딩 대기 (약 10초)
+            time.sleep(10)
+        except Exception as e:
+            print(f"⚠️ Failed to start TRELLIS container: {e}")
+
+        client = TrellisAPIClient(base_url=settings.TRELLIS_API_URL)
+
+        # Health check
+        try:
+            health = client.health_check()
+            if health.get('status') != 'healthy':
+                raise Exception(f"TRELLIS API not healthy: {health}")
+            print(f"✅ TRELLIS API ready (GPU memory: {health.get('gpu_memory_used', 0):.2f}GB)")
+        except Exception as e:
+            raise Exception(f"TRELLIS API health check failed: {e}")
+
+        asset_3d_paths = {}
+        scene_name = state["scene_name"]
+
+        # 각 에셋에 대해 3D 생성
+        for asset_name, image_paths in cropped_assets.items():
+            if not image_paths:
+                continue
+
+            # 첫 번째 이미지 사용 (보통 하나만 있음)
+            image_path = image_paths[0]
+
+            print(f"🎯 Generating 3D for: {asset_name}")
+
+            # 출력 경로 설정
+            output_dir = f"/home/0in/workspace/Text2VR/output/3d_assets/{scene_name}"
+            output_path = f"{output_dir}/{asset_name}.glb"
+
+            try:
+                # TRELLIS API 호출
+                result_path = client.generate_3d_asset(
+                    image_path=image_path,
+                    asset_name=asset_name,
+                    output_path=output_path,
+                    timeout=120  # 2분 타임아웃
+                )
+
+                asset_3d_paths[asset_name] = result_path
+                print(f"✅ 3D asset created: {result_path}")
+
+            except Exception as asset_exc:
+                print(f"❌ Failed to generate 3D for {asset_name}: {asset_exc}")
+                # 계속 진행 (일부 실패해도 나머지 처리)
+                continue
+
+        # TRELLIS 컨테이너 중지 (VRAM 해제)
+        try:
+            print("🛑 Stopping TRELLIS container to free VRAM...")
+            subprocess.run(
+                ["docker", "stop", "text2vr_trellis_api"],
+                capture_output=True,
+                timeout=10
+            )
+            print("✅ TRELLIS container stopped")
+        except Exception as e:
+            print(f"⚠️ Failed to stop TRELLIS container: {e}")
+
+        # Task manager 업데이트
+        try:
+            if state.get("task_id") and asset_3d_paths:
+                task_manager.update_task_status(
+                    task_id=state["task_id"],
+                    status=TaskStatus.PROCESSING,
+                    message=f"3D assets generated ({len(asset_3d_paths)} assets), starting inpainting...",
+                )
+                print(f"✅ Task manager updated for task_id: {state['task_id']}")
+        except Exception as tm_exc:
+            print(f"⚠️ Failed to update task manager: {tm_exc}")
+
+        print(f"🎉 3D generation completed: {len(asset_3d_paths)}/{len(cropped_assets)} assets")
+
+        return {
+            **state,
+            "asset_3d_paths": asset_3d_paths,
+            "messages": [
+                HumanMessage(
+                    content=f"3D assets generated: {list(asset_3d_paths.keys())}"
+                )
+            ],
+        }
+
+    except Exception as exc:
+        print(f"❌ 3D asset generation failed: {exc}")
+        return {
+            **state,
+            "asset_3d_paths": {},
+            "messages": [
+                HumanMessage(content=f"3D generation failed: {str(exc)}")
             ],
         }
 

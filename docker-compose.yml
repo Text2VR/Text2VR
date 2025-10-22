@@ -84,7 +84,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1            
+              count: 1
               capabilities: [gpu]
     volumes:
       - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
@@ -96,4 +96,31 @@ services:
       - ./cache/hf:/root/.cache/huggingface
       - ./cache/torch:/root/.cache/torch
     command: ["bash", "/workspace/start_api.sh"]
+    restart: unless-stopped
+
+  # TRELLIS 3D Asset Generation API
+  trellis-api:
+    image: trellis:v1
+    container_name: text2vr_trellis_api
+    working_dir: /app
+    ports:
+      - "8004:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - SPCONV_ALGO=native
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./TRELLIS_API/trellis_api_v2.py:/app/trellis_api_v2.py:ro
+      - ./seged_assets:/app/seged_assets:ro
+      - ./output/3d_assets:/app/output/3d_assets
+      - ./cache/hf:/root/.cache/huggingface
+      - ./cache/torch:/root/.cache/torch
+    command: ["python", "/app/trellis_api_v2.py"]
     restart: unless-stopped

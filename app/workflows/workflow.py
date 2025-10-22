@@ -8,6 +8,7 @@ from .nodes import (
     panorama_generation_node,
     query_rewrite_node,
     segmentation_node,
+    asset_3d_generation_node,
     inpainting_node,
     ply_generation_node,
 )
@@ -21,13 +22,15 @@ def create_workflow():
     workflow.add_node("query_rewrite", query_rewrite_node)
     workflow.add_node("panorama_generation", panorama_generation_node)
     workflow.add_node("segmentation", segmentation_node)
+    workflow.add_node("asset_3d_generation", asset_3d_generation_node)
     workflow.add_node("inpainting", inpainting_node)
     workflow.add_node("ply_generation", ply_generation_node)
 
     workflow.set_entry_point("query_rewrite")
     workflow.add_edge("query_rewrite", "panorama_generation")
     workflow.add_edge("panorama_generation", "segmentation")
-    workflow.add_edge("segmentation", "inpainting")
+    workflow.add_edge("segmentation", "asset_3d_generation")
+    workflow.add_edge("asset_3d_generation", "inpainting")
     workflow.add_edge("inpainting", "ply_generation")
     workflow.add_edge("ply_generation", END)
 
