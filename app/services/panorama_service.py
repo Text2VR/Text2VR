@@ -72,73 +72,45 @@ class PanoramaService:
     
     async def _ensure_dreamscene_api(self) -> None:
         """Ensure DreamScene360 API server is running"""
+        import httpx
+
         try:
-            # Check if API is already running
-            result = subprocess.run(
-                ["curl", "-f", f"{settings.DREAMSCENE_API_URL}/health"],
-                capture_output=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                logger.info("DreamScene360 API is already running")
-                return
-                
-        except subprocess.TimeoutExpired:
-            logger.warning("Health check timed out")
-        except Exception as e:
-            logger.warning(f"Health check failed: {e}")
-        
-        # Start the API server if not running
-        logger.info("Starting DreamScene360 API server...")
-        
-        self._dreamscene_process = subprocess.Popen(
-            ["python", "api_server.py"],
-            cwd=settings.dreamscene_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        # Wait for server to start
-        import asyncio
-        await asyncio.sleep(10)
-        
-        # Verify it started
-        try:
-            result = subprocess.run(
-                ["curl", "-f", f"{settings.DREAMSCENE_API_URL}/health"],
-                capture_output=True,
-                timeout=10
-            )
-            
-            if result.returncode != 0:
-                raise Exception("Failed to start DreamScene360 API server")
-            
-            logger.info("DreamScene360 API server started successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to verify API server: {e}")
-            raise
+            # Check if API is already running using httpx (async)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{settings.DREAMSCENE_API_URL}/health", timeout=5.0)
+                if response.status_code == 200:
+                    logger.info("DreamScene360 API is already running")
+                    return
+
+        except (httpx.RequestError, httpx.TimeoutException) as e:
+            logger.warning(f"DreamScene360 API not responding: {e}")
+
+        # If API is not running, log warning but don't block
+        # The API should be started via docker-compose
+        logger.warning("DreamScene360 API is not running. Please ensure docker-compose services are started.")
+        logger.info("Continuing with workflow - external API calls may fail if services are not available")
     
     async def _run_langgraph_workflow(self, task_id: str, request: PanoramaRequest) -> Optional[str]:
         """Run the LangGraph workflow"""
         try:
             # Import LangGraph workflow
             from ..workflows.workflow import create_workflow
-            
+            import asyncio
+            from functools import partial
+
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
                 "Preparing AI workflow..."
             )
-            
+
             # Create workflow
             workflow = create_workflow()
-            
+
             # Prepare initial state
             task = task_manager.get_task(task_id)
             scene_name = task.scene_name if task else f"scene_{task_id[:8]}"
-            
+
             initial_state = {
                 "task_id": task_id,
                 "user_input": request.text,
@@ -148,23 +120,27 @@ class PanoramaService:
                 "segmentation_data": {},
                 "messages": []
             }
-            
+
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
                 "Generating panorama with AI models..."
             )
-            
-            # Run workflow
+
+            # Run workflow in executor to avoid blocking
             logger.info(f"Running LangGraph workflow for task {task_id}")
-            result = workflow.invoke(initial_state)
-            
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                partial(workflow.invoke, initial_state)
+            )
+
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
                 "Finalizing panorama generation..."
             )
-            
+
             logger.info(f"LangGraph workflow completed for task {task_id}")
             return result.get("panorama_path")
             

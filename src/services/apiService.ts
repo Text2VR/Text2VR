@@ -4,6 +4,8 @@ class ApiService {
   private baseUrl = '';
 
   async generatePanorama(request: GenerateRequest): Promise<GenerateResponse> {
+    console.log('[API] Sending generate request:', request);
+
     const response = await fetch('/generate', {
       method: 'POST',
       headers: {
@@ -12,11 +14,17 @@ class ApiService {
       body: JSON.stringify(request),
     });
 
+    console.log('[API] Generate response status:', response.status);
+
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[API] Generate error response:', errorText);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    console.log('[API] Generate response data:', data);
+    return data;
   }
 
   async getStatus(taskId: string): Promise<StatusResponse> {
@@ -33,8 +41,15 @@ class ApiService {
     return `/panorama/${taskId}?t=${Date.now()}`;
   }
 
-  getSegmentationUrl(taskId: string): string {
-    return `/segmentation/${taskId}?t=${Date.now()}`;
+  async getSegmentationAssets(taskId: string): Promise<Array<{name: string, url: string}>> {
+    const response = await fetch(`/segmentation/${taskId}`);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.assets;
   }
 
   getInpaintedUrl(taskId: string): string {

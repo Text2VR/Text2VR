@@ -62,6 +62,9 @@ async def get_task_status(task_id: str):
         status=task.status,
         message=task.message,
         panorama_path=task.panorama_path,
+        segmentation_results_path=task.segmentation_results_path,
+        segmentation_visualization_path=task.segmentation_visualization_path,
+        inpainted_panorama_path=task.inpainted_panorama_path,
         scene_name=task.scene_name,
         created_at=task.created_at,
         updated_at=task.updated_at
@@ -112,25 +115,101 @@ async def download_panorama(task_id: str):
 
 
 @router.get("/segmentation/{task_id}")
-async def get_segmentation_visualization(task_id: str):
-    """Download segmentation visualization image"""
+async def get_segmentation_assets(task_id: str):
+    """Get list of segmented asset images"""
     task = task_manager.get_task(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if not task.segmentation_visualization_path:
+    # Extract scene name from panorama_path or segmentation_results_path
+    scene_name = None
+    if task.panorama_path:
+        # Extract from path like /home/.../data/scene_xxx/panorama.png
+        import re
+        match = re.search(r'scene_[a-f0-9]+', task.panorama_path)
+        if match:
+            scene_name = match.group(0)
+
+    if not scene_name and task.segmentation_results_path:
+        import re
+        match = re.search(r'scene_[a-f0-9]+', task.segmentation_results_path)
+        if match:
+            scene_name = match.group(0)
+
+    if not scene_name:
         raise HTTPException(
             status_code=400,
-            detail="Segmentation visualization not yet available"
+            detail="Scene name not available"
         )
 
-    if not os.path.exists(task.segmentation_visualization_path):
-        raise HTTPException(status_code=404, detail="Segmentation visualization file not found")
+    # Find segmented assets in seged_assets/{scene_name}/
+    seged_assets_dir = f"/home/0in/workspace/Text2VR/seged_assets/{scene_name}"
+
+    logger.info(f"Looking for segmented assets in: {seged_assets_dir}")
+    logger.info(f"Directory exists: {os.path.exists(seged_assets_dir)}")
+
+    if not os.path.exists(seged_assets_dir):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Segmented assets not yet available (looking for {scene_name})"
+        )
+
+    # Get all PNG files in the directory
+    asset_files = glob.glob(os.path.join(seged_assets_dir, "*.png"))
+
+    if not asset_files:
+        raise HTTPException(
+            status_code=404,
+            detail="No segmented assets found"
+        )
+
+    # Return list of asset names and URLs
+    assets = []
+    for file_path in asset_files:
+        asset_name = os.path.basename(file_path).replace(".png", "")
+        assets.append({
+            "name": asset_name,
+            "url": f"/segmentation/{task_id}/asset/{asset_name}"
+        })
+
+    return {"assets": assets}
+
+
+@router.get("/segmentation/{task_id}/asset/{asset_name}")
+async def get_segmentation_asset(task_id: str, asset_name: str):
+    """Download a specific segmented asset image"""
+    task = task_manager.get_task(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Extract scene name from panorama_path or segmentation_results_path
+    scene_name = None
+    if task.panorama_path:
+        import re
+        match = re.search(r'scene_[a-f0-9]+', task.panorama_path)
+        if match:
+            scene_name = match.group(0)
+
+    if not scene_name and task.segmentation_results_path:
+        import re
+        match = re.search(r'scene_[a-f0-9]+', task.segmentation_results_path)
+        if match:
+            scene_name = match.group(0)
+
+    if not scene_name:
+        raise HTTPException(status_code=400, detail="Scene name not available")
+
+    # Construct the asset path
+    asset_path = f"/home/0in/workspace/Text2VR/seged_assets/{scene_name}/{asset_name}.png"
+
+    if not os.path.exists(asset_path):
+        raise HTTPException(status_code=404, detail="Asset file not found")
 
     return FileResponse(
-        path=task.segmentation_visualization_path,
-        filename=f"segmentation_{task.scene_name}.png",
+        path=asset_path,
+        filename=f"{asset_name}.png",
         media_type="image/png"
     )
 

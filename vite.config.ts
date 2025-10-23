@@ -28,6 +28,14 @@ export default defineConfig({
       '/health': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+      },
+      '/segmentation': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/inpainted': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
       }
     }
   }

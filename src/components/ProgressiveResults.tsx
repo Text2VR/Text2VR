@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/apiService';
 
 interface ProgressiveResultsProps {
@@ -9,6 +9,11 @@ interface ProgressiveResultsProps {
   status: 'queued' | 'processing' | 'completed' | 'failed';
 }
 
+interface SegmentedAsset {
+  name: string;
+  url: string;
+}
+
 export const ProgressiveResults: React.FC<ProgressiveResultsProps> = ({
   taskId,
   panoramaPath,
@@ -16,11 +21,29 @@ export const ProgressiveResults: React.FC<ProgressiveResultsProps> = ({
   inpaintedPath,
   status,
 }) => {
-  if (!taskId) return null;
+  const [segmentedAssets, setSegmentedAssets] = useState<SegmentedAsset[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
 
   const panoramaUrl = panoramaPath && taskId ? apiService.getPanoramaUrl(taskId) : null;
-  const segmentationUrl = segmentationPath && taskId ? apiService.getSegmentationUrl(taskId) : null;
   const inpaintedUrl = inpaintedPath && taskId ? apiService.getInpaintedUrl(taskId) : null;
+
+  // Fetch segmented assets when segmentation is complete
+  useEffect(() => {
+    if (taskId && segmentationPath) {
+      setLoadingAssets(true);
+      apiService.getSegmentationAssets(taskId)
+        .then(assets => {
+          setSegmentedAssets(assets);
+          setLoadingAssets(false);
+        })
+        .catch(err => {
+          console.error('Failed to load segmented assets:', err);
+          setLoadingAssets(false);
+        });
+    }
+  }, [taskId, segmentationPath]);
+
+  if (!taskId) return null;
 
   return (
     <div style={{ marginTop: '30px' }}>
@@ -103,24 +126,59 @@ export const ProgressiveResults: React.FC<ProgressiveResultsProps> = ({
           gap: '10px'
         }}>
           <span>{segmentationPath ? '✅' : '⏳'}</span>
-          <span>2. Segmentation Visualization</span>
+          <span>2. Segmented Objects</span>
         </h3>
-        {segmentationUrl ? (
-          <div>
-            <img
-              src={segmentationUrl}
-              alt="Segmentation visualization"
-              style={{
-                width: '100%',
-                height: 'auto',
+        {loadingAssets ? (
+          <div style={{
+            padding: '40px',
+            textAlign: 'center',
+            color: '#999',
+            fontSize: '14px',
+            backgroundColor: '#fff',
+            borderRadius: '8px',
+            border: '1px dashed #ddd'
+          }}>
+            Loading segmented objects...
+          </div>
+        ) : segmentedAssets.length > 0 ? (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+            gap: '15px',
+            padding: '10px'
+          }}>
+            {segmentedAssets.map((asset) => (
+              <div key={asset.name} style={{
+                backgroundColor: '#fff',
                 borderRadius: '8px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              }}
-              onError={(e) => {
-                console.error('Failed to load segmentation image');
-                e.currentTarget.style.display = 'none';
-              }}
-            />
+                padding: '10px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                textAlign: 'center'
+              }}>
+                <img
+                  src={asset.url + `?t=${Date.now()}`}
+                  alt={asset.name}
+                  style={{
+                    width: '100%',
+                    height: 'auto',
+                    borderRadius: '6px',
+                    marginBottom: '8px'
+                  }}
+                  onError={(e) => {
+                    console.error(`Failed to load asset: ${asset.name}`);
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+                <div style={{
+                  fontSize: '12px',
+                  color: '#666',
+                  fontWeight: '500',
+                  textTransform: 'capitalize'
+                }}>
+                  {asset.name.replace(/_/g, ' ')}
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <div style={{

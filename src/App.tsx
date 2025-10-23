@@ -75,10 +75,14 @@ export const App: React.FC = () => {
     setInpaintedPath(null);
 
     try {
+      console.log('[App] Calling generatePanorama with:', { text, sceneName });
       const response = await apiService.generatePanorama({
         text,
         scene_name: sceneName || null
       });
+
+      console.log('[App] Received response:', response);
+      console.log('[App] Setting taskId:', response.task_id);
 
       setCurrentTaskId(response.task_id);
       setStatus({
@@ -87,9 +91,10 @@ export const App: React.FC = () => {
         task_id: response.task_id
       });
 
+      console.log('[App] Starting status checking for:', response.task_id);
       startStatusChecking(response.task_id);
     } catch (error) {
-      console.error('Generation error:', error);
+      console.error('[App] Generation error:', error);
       setStatus({
         status: 'failed',
         message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
