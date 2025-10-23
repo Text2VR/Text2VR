@@ -19,7 +19,7 @@ def test_workflow():
         
         # Test input
         test_input = {
-            "user_input": "A peaceful forest with tall trees and sunlight",
+            "user_input": "실내 모던 침실",
             "rewritten_query": "",
             "scene_name": "",
             "panorama_path": "",
