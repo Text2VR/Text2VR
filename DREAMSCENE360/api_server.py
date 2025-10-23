@@ -7,7 +7,9 @@ import os
 import uuid
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
+import subprocess
+import re
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -26,6 +28,7 @@ app = FastAPI(title="DreamScene360 Panorama API", version="1.0.0")
 # Task storage
 tasks = {}
 WORKING_DIR = "/workspace/data"
+PROJECT_ROOT = "/workspace/DREAMSCENE360"
 
 class PanoramaRequest(BaseModel):
     text: str
@@ -48,6 +51,22 @@ class StatusResponse(BaseModel):
 class PanoramaToPlyRequest(BaseModel):
     panorama_path: str
     output_name: Optional[str] = None
+
+class TrainGaussianRequest(BaseModel):
+    panorama_path: str
+    scene_name: Optional[str] = None
+    iterations: int = 100
+    save_iterations: List[int] = [50, 100]
+    gen_res: int = 512
+    white_background: bool = False
+    sh_degree: int = 3
+
+class TrainGaussianResponse(BaseModel):
+    status: str
+    message: str
+    model_path: Optional[str] = None
+    initial_ply_path: Optional[str] = None
+    trained_ply_paths: Optional[List[str]] = None
 
 def generate_task(task_id: str, request: PanoramaRequest):
     """Background task for panorama generation"""
@@ -210,10 +229,97 @@ async def panorama_to_ply(request: PanoramaToPlyRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error converting to PLY: {str(e)}")
 
+@app.post("/train_gaussian", response_model=TrainGaussianResponse)
+async def train_gaussian(request: TrainGaussianRequest):
+    """Train Gaussian Splatting model from a panorama"""
+    try:
+        # Validate panorama path
+        if not os.path.exists(request.panorama_path):
+            raise HTTPException(status_code=404, detail=f"Panorama file not found: {request.panorama_path}")
+
+        # Prepare source directory
+        source_dir = os.path.dirname(request.panorama_path)
+        source_name = os.path.splitext(os.path.basename(request.panorama_path))[0]
+
+        # Generate a unique output directory for this training run
+        scene_name = request.scene_name or f"gaussian_scene_{str(uuid.uuid4())[:8]}"
+        # Use /workspace/plyoutput instead of outputs
+        model_path = os.path.join("/workspace/plyoutput", scene_name)
+        os.makedirs(model_path, exist_ok=True)
+
+        # Prepare command arguments
+        cmd_args = [
+            "python", "train.py",
+            "--source_path", source_dir,
+            "--pano_path", request.panorama_path,
+            "--model_path", model_path,
+            "--iterations", str(request.iterations),
+            "--save_iterations"
+        ]
+        # Add save_iterations as separate arguments
+        cmd_args.extend([str(x) for x in request.save_iterations])
+        cmd_args.extend([
+            "--sh_degree", str(request.sh_degree)
+        ])
+
+        # Add optional white background flag
+        if request.white_background:
+            cmd_args.append("--white_background")
+
+        # Run training with subprocess
+        print(f"🚀 Executing: {' '.join(cmd_args)}")
+        process = subprocess.run(
+            cmd_args,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=3600
+        )
+
+        # Log subprocess output for debugging
+        print(f"📊 Return code: {process.returncode}")
+        if process.stdout:
+            print(f"📤 STDOUT:\n{process.stdout[-2000:]}")  # Last 2000 chars
+        if process.stderr:
+            print(f"📛 STDERR:\n{process.stderr[-2000:]}")  # Last 2000 chars
+
+        # Check if process failed
+        if process.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Training process failed with code {process.returncode}. Error: {process.stderr[:500]}"
+            )
+
+        # Parse output to find model path and PLY files
+        model_path_match = re.search(r"Output folder: (.*)", process.stdout)
+        initial_ply_path = os.path.join(source_dir, "point_cloud.ply")
+
+        # Find trained PLY paths
+        trained_ply_paths = []
+        for save_iter in request.save_iterations:
+            ply_path = os.path.join(model_path, f"point_cloud_iter_{save_iter}.ply")
+            if os.path.exists(ply_path):
+                trained_ply_paths.append(ply_path)
+
+        return TrainGaussianResponse(
+            status="success",
+            message="Gaussian Splatting model training completed",
+            model_path=model_path,
+            initial_ply_path=initial_ply_path if os.path.exists(initial_ply_path) else None,
+            trained_ply_paths=trained_ply_paths
+        )
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Training timed out after 1 hour")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Training failed: {e.stderr}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during training: {str(e)}")
+
 if __name__ == "__main__":
     uvicorn.run(
         "api_server:app",
-        host="0.0.0.0", 
+        host="0.0.0.0",
         port=8001,
         log_level="info"
     )

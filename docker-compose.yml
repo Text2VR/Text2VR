@@ -25,6 +25,8 @@ services:
       - ./stitch_output:/workspace/DREAMSCENE360/stitch_diffusion/output
       - ./pre_checkpoints:/workspace/DREAMSCENE360/pre_checkpoints
       - ./data:/workspace/data
+      - ./inpainted_pano:/workspace/inpainted_pano
+      - ./plyoutput:/workspace/plyoutput
     command: ["bash", "/workspace/DREAMSCENE360/start_api.sh"]
     restart: unless-stopped
 

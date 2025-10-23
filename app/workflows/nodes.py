@@ -577,32 +577,51 @@ def ply_generation_node(state: WorkflowState) -> WorkflowState:
 
         print(f"🔄 Container path: {container_path}")
 
-        # API 호출
+        # API 호출 (Train Gaussian Splatting)
         response = requests.post(
-            f"{settings.DREAMSCENE_API_URL}/panorama_to_ply",
+            f"{settings.DREAMSCENE_API_URL}/train_gaussian",
             json={
                 "panorama_path": container_path,
-                "output_name": "scene.ply"
+                "scene_name": state.get("scene_name", "default_scene"),
+                "iterations": 100,
+                "save_iterations": [50, 100]
             },
-            timeout=300
+            timeout=600  # Increased timeout due to training time
         )
 
         if response.status_code == 200:
             result = response.json()
-            container_ply_path = result["ply_path"]
+
+            print(f"🔍 API Response: {result}")
+
+            # Select the last (most trained) PLY path
+            trained_ply_paths = result.get("trained_ply_paths", [])
+            container_ply_path = trained_ply_paths[-1] if trained_ply_paths else result.get("initial_ply_path")
+
+            if not container_ply_path:
+                error_msg = f"No PLY paths returned from API. Response: {result}"
+                print(f"❌ {error_msg}")
+                return {
+                    **state,
+                    "ply_path": "",
+                    "messages": [
+                        HumanMessage(content=f"PLY generation failed: {error_msg}")
+                    ],
+                }
 
             # 호스트 경로로 변환
             host_ply_path = container_ply_path.replace(
-                "/workspace/output", "/home/0in/workspace/Text2VR/plyoutput"
+                "/workspace/plyoutput", "/home/0in/workspace/Text2VR/plyoutput"
             )
 
-            print(f"✅ PLY generation completed: {host_ply_path}")
+            print(f"✅ Gaussian Splatting training completed: {host_ply_path}")
 
             return {
                 **state,
                 "ply_path": host_ply_path,
+                "model_path": result.get("model_path", ""),  # Store model path for future use
                 "messages": [
-                    HumanMessage(content=f"PLY file generated: {host_ply_path}")
+                    HumanMessage(content=f"Gaussian Splatting trained. Final PLY: {host_ply_path}")
                 ],
             }
         else:
@@ -612,7 +631,7 @@ def ply_generation_node(state: WorkflowState) -> WorkflowState:
                 **state,
                 "ply_path": "",
                 "messages": [
-                    HumanMessage(content=f"PLY generation failed: {error_msg}")
+                    HumanMessage(content=f"Gaussian Splatting training failed: {error_msg}")
                 ],
             }
 
