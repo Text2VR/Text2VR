@@ -512,19 +512,35 @@ ALLOWED_LABELS = {
     # seating
     "sofa", "couch", "armchair", "chair", "stool", "bench",
     # tables
-    "table", "coffee table", "side table",
+    "table", "coffee table", "side table","picnic table",
     # decor / appliances
-    "plant", "potted plant", "lamp", "floor lamp",
+    "plant", "potted plant", "planter", "lamp", "floor lamp",
     "cabinet", "shelf", "bookshelf", "tv", "television", "pillow", "rug", 
     "fan", "heater", "speaker", "printer", "computer", "laptop", "keyboard", "mouse", "phone", "tablet",
     "paintings", "picture", "art", "sculpture", "statue",
-    "tree", "bush", "flower"
+    "tree", "flower",
+    "street light", "lamppost", 
+    "trash can", "bin",         
+    "fountain",                 
+    "statue", "sculpture",      
+    "sign",                     
+    "bicycle",                  
+    "bollard",                  
+    "fence",                    
 }
 BLACKLIST_LABELS = {
     # background-like categories we don't segment as assets
     "door", "window", "wall", "floor", "ceiling", "sky", "balcony", "frame", "stairs",
     # too amorphous for stable interaction
-    "shadow", "light", "reflection", "curtain"
+    "shadow", "light", "reflection", "curtain",
+    
+    # outdoor-only items
+    # Background structures & surfaces
+    "building", "wall", "road", "street", "pavement", "sidewalk", "path", 
+    "ground", "grass", "dirt", "sand", 
+    "sky", "cloud", "water", "river",  
+    "person", "car", "vehicle", "bus", 
+    "bush", "brush", "shrub", "palm",
 }
 SYNONYMS = {
     "couch": "sofa",
@@ -537,6 +553,15 @@ SYNONYMS = {
     "shrub": "plant",
     "palm": "plant",
     "curtains": "curtain",
+    "flower pot": "planter",
+    
+    # Fixture-related
+    "lamppost": "street light",
+    "bin": "trash can",
+    "waste bin": "trash can",
+    "garbage can": "trash can",
+    "sculpture": "statue",
+
 }
 DEFAULT_FALLBACK = ["sofa", "chair", "table", "plant", "lamp", "bench"]
 

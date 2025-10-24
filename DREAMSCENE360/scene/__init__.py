@@ -64,48 +64,136 @@ def _jitter_R(R, yaw_deg=2.0, pitch_deg=1.0):
 # Output:
 #   z: [h,w] torch, per-pixel z-depth in the camera frame
 # -----------------------------------------------------------------------------
+# --- add: robust plane fit + optional inlier refit ---
+@torch.no_grad()
+def enforce_floor_plane(dist_erp: torch.Tensor,
+                        pano_dirs: torch.Tensor,
+                        beta_thresh_deg: float = 55.0,
+                        inlier_tol: float = 0.05,
+                        return_plane: bool = False):
+    """Fit a floor plane on nadir rays and snap those depths to the plane.
+    Returns corrected ERP distances; optionally also (n, d)."""
+    dist_erp = _to_hw(dist_erp)                               # [H,W]
+    H, W = dist_erp.shape
+    dirs = pano_dirs.reshape(-1, 3).cpu().numpy()
+    s    = dist_erp.reshape(-1).cpu().numpy()
+
+    th = np.deg2rad(beta_thresh_deg)
+    mask = dirs[:, 2] < -np.sin(th)                           # nadir band
+    if mask.sum() < 500:
+        return (dist_erp if not return_plane else (dist_erp, np.array([0,0,1],np.float32), 0.0))
+
+    pts = dirs[mask] * s[mask, None]
+    # initial SVD fit
+    c = pts.mean(axis=0, keepdims=True)
+    _, _, Vt = np.linalg.svd(pts - c, full_matrices=False)
+    n = Vt[-1]; d = -np.dot(n, c[0])
+    if n[2] < 0: n = -n; d = -d
+
+    # inlier refit (relative error in ray-length space)
+    denom = (dirs[mask] @ n); denom[np.abs(denom) < 1e-6] = 1e-6
+    s_on = (-d) / denom
+    err = np.abs(s_on - s[mask]) / np.maximum(s[mask], 1e-6)
+    inl = err < inlier_tol
+    if inl.sum() > 500:
+        pts_inl = pts[inl]
+        c2 = pts_inl.mean(axis=0, keepdims=True)
+        _, _, Vt2 = np.linalg.svd(pts_inl - c2, full_matrices=False)
+        n = Vt2[-1]; d = -np.dot(n, c2[0])
+        if n[2] < 0: n = -n; d = -d
+
+    # snap nadir depths to the plane
+    denom_all = (dirs @ n); denom_all[np.abs(denom_all) < 1e-6] = 1e-6
+    s_all = (-d) / denom_all
+    s_fixed = s.copy()
+    s_fixed[mask] = s_all[mask]
+
+    out = torch.from_numpy(s_fixed.reshape(H, W)).to(dist_erp.device, dist_erp.dtype)
+    return (out if not return_plane else (out, n.astype(np.float32), float(d)))
+
+
+@torch.no_grad()
+def clip_to_plane(dist_hw: torch.Tensor,
+                  pano_dirs: torch.Tensor,
+                  n, d, beta_deg: float = 55, slack: float = 0.03) -> torch.Tensor:
+    """
+    Clamp nadir distances so they never go below the fitted plane.
+    dist_hw: [H,W] ERP ray-length
+    pano_dirs: [H,W,3] ERP unit directions (z-up)
+    (n,d): plane in world coords, n·x + d = 0
+    beta_deg: angular threshold for nadir band
+    slack: small tolerance as a fraction of plane distance (prevents over-clamp)
+    """
+    assert dist_hw.dim() == 2
+    H, W = dist_hw.shape
+    dirs = pano_dirs.reshape(-1, 3).cpu().numpy()
+    s = dist_hw.reshape(-1).cpu().numpy()
+
+    th = np.deg2rad(beta_deg)
+    nadir = dirs[:, 2] < -np.sin(th)                      # downward directions
+
+    n = np.asarray(n, dtype=np.float32)
+    denom = dirs @ n
+    denom[np.abs(denom) < 1e-6] = 1e-6
+    s_plane = (-float(d)) / denom                         # plane ray-length per direction
+
+    if nadir.any():
+        eps = slack * np.median(s_plane[nadir])           # tolerance proportional to plane depth
+        s[nadir] = np.maximum(s[nadir], s_plane[nadir] - eps)
+
+    return torch.from_numpy(s.reshape(H, W)).to(dist_hw.device, dist_hw.dtype)
+
+
+def _to_hw(x: torch.Tensor) -> torch.Tensor:
+    """Force depth to [H,W] float32."""
+    if x.dim() == 4:              # [B,C,H,W]
+        x = x.squeeze(0).squeeze(0)
+    elif x.dim() == 3:            # [C,H,W] or [H,W,1]
+        if x.shape[0] == 1:       # [1,H,W]
+            x = x[0]
+        elif x.shape[-1] == 1:    # [H,W,1]
+            x = x[..., 0]
+    assert x.dim() == 2, f"expected [H,W], got {tuple(x.shape)}"
+    return x.contiguous().to(torch.float32)
+
 def erp_raylen_to_view_z(dist_erp, R_wc, fx, fy, cx, cy, w, h):
-    device = dist_erp.device
-    # Pixel grid
+    """Convert ERP ray-length s(theta,phi) to per-view z-depth."""
+    # Normalize input to [H,W] float32
+    dist_erp = _to_hw(dist_erp)
+    device, dtype = dist_erp.device, dist_erp.dtype
+
+    # Build per-pixel unit rays in camera space
     jj, ii = torch.meshgrid(torch.arange(w, device=device),
                             torch.arange(h, device=device),
                             indexing='xy')
-    x = (jj - cx) / fx
-    y = (ii - cy) / fy
-    z = torch.ones_like(x)
-    d_cam = torch.stack([x, y, z], dim=-1)                                  # [h,w,3]
+    x = (jj.to(dtype) - torch.as_tensor(cx, device=device, dtype=dtype)) / torch.as_tensor(fx, device=device, dtype=dtype)
+    y = (ii.to(dtype) - torch.as_tensor(cy, device=device, dtype=dtype)) / torch.as_tensor(fy, device=device, dtype=dtype)
+    z = torch.ones_like(x, dtype=dtype)
+    d_cam = torch.stack([x, y, z], dim=-1)                     # [h,w,3]
     d_cam = d_cam / (d_cam.norm(dim=-1, keepdim=True) + 1e-8)
 
-    # Cam->World
+    # Ensure R_wc is 3x3 tensor on the right device/dtype
     if not torch.is_tensor(R_wc):
-        R_wc = torch.from_numpy(np.asarray(R_wc)).to(device=device, dtype=torch.float32)
-    d_world = torch.einsum('ij,hwj->hwi', R_wc, d_cam)                       # [h,w,3]
+        R_wc = torch.from_numpy(np.asarray(R_wc))
+    assert R_wc.shape == (3, 3), f"R_wc must be 3x3, got {tuple(R_wc.shape)}"
+    R_wc = R_wc.to(device=device, dtype=dtype)
 
-    # World dir -> ERP coords (normalized to [-1,1])
-    '''
-    lam = torch.atan2(d_world[..., 2], d_world[..., 0])                      # [-pi, pi]
-    phi = torch.asin(torch.clamp(d_world[..., 1], -1, 1))                    # [-pi/2, pi/2]
-    u_norm = lam / np.pi                                                     # [-1,1]
-    v_norm = -2.0 * phi / np.pi                                             # [-1,1] top is -1
+    # Rays to world space
+    d_world = torch.einsum('ij,hwj->hwi', R_wc, d_cam)          # [h,w,3]
 
-    grid = torch.stack([u_norm, v_norm], dim=-1).unsqueeze(0)                # [1,h,w,2]
-    '''
-    # after (alpha=atan2(y,x), beta=asin(z))
-    alpha = torch.atan2(d_world[..., 1], d_world[..., 0])   # [-pi, pi]
-    beta  = torch.asin(torch.clamp(d_world[..., 2], -1, 1)) # [-pi/2, pi/2]
-    u_norm = alpha / np.pi
-    v_norm = -2.0 * beta / np.pi
-    grid = torch.stack([u_norm, v_norm], dim=-1).unsqueeze(0)
-    
-    # Sample ray-length s from ERP
+    # World dir -> ERP coords (lambda, phi)
+    lam = torch.atan2(d_world[..., 2], d_world[..., 0])
+    phi = torch.asin(d_world[..., 1].clamp(-1, 1))
+    u_norm = lam / np.pi                                        # [-1,1]
+    v_norm = -2.0 * phi / np.pi                                 # [-1,1]
+    grid = torch.stack([u_norm, v_norm], dim=-1).unsqueeze(0)   # [1,h,w,2]
+
+    # Sample ray-length and convert to z-depth
     s = torch.nn.functional.grid_sample(
-        dist_erp[None, None, ...], grid, mode='bilinear',
-        padding_mode='border', align_corners=True
-    )[0, 0]                                                                  # [h,w]
-
-    # Convert to z-depth
-    z = s * d_cam[..., 2].clamp_min(1e-6)
-    return z
+        dist_erp[None, None, ...], grid,
+        mode='bilinear', padding_mode='border', align_corners=True
+    )[0, 0]                                                     # [h,w]
+    return s * d_cam[..., 2].clamp_min(1e-6)                    # [h,w]
 
 
 # -----------------------------------------------------------------------------
@@ -139,46 +227,118 @@ def _fit_plane_svd(pts):
         n = -n; d = -d
     return n.astype(np.float32), float(d)
 
-@torch.no_grad()
-def enforce_floor_plane(dist_erp, pano_dirs, beta_thresh_deg=35, inlier_tol=0.06):
-    """
-    dist_erp: [H,W] torch (ray-length along dirs)
-    pano_dirs: [H,W,3] torch (ERP ray directions, z가 up)
-    1) nadir band(downward directions) plane fitting
-    2) inlier re-fitting for robustness (>500 inliers)
-    """
-    H, W = dist_erp.shape
-    dirs = pano_dirs.reshape(-1, 3).cpu().numpy()
-    dist = dist_erp.reshape(-1).cpu().numpy()
+import numpy as np
+import torch
 
-    # nadir band mask: z < -sin(beta) (= downward)
-    th = np.deg2rad(beta_thresh_deg)
-    mask = dirs[:, 2] < -np.sin(th)
-    if mask.sum() < 500:  # too few points to fit a plane -> skip
+def _smoothstep(x):
+    # [0,1] -> smooth S-curve
+    x = x.clamp_(0, 1)
+    return x * x * (3 - 2 * x)
+
+@torch.no_grad()
+def enforce_floor_plane_feather_anchored(
+    dist_erp: torch.Tensor,
+    pano_dirs: torch.Tensor,
+    beta_start_deg: float = 35.0,   # band starts
+    beta_end_deg:   float = 70.0,   # deeper nadir used for fitting
+    rel_growth_cap: float = 0.35    # optional cap to prevent excessive drop
+):
+    """
+    Flatten nadir using a plane fitted on deep-nadir points, then FEATHER to the boundary.
+    The plane is *anchored* to match the original distance at the band boundary to avoid a gap.
+
+    dist_erp : [H,W] ERP ray-length (float, CUDA ok)
+    pano_dirs: [H,W,3] ERP ray directions (z-up)
+    """
+    # to cpu numpy for simple linear algebra
+    s = dist_erp.detach().float().cpu().numpy()          # [H,W]
+    ddir = pano_dirs.detach().float().cpu().numpy()      # [H,W,3]
+    H, W = s.shape
+
+    z = ddir[..., 2]
+    z1 = -np.sin(np.deg2rad(beta_start_deg))             # start band (less steep)
+    z2 = -np.sin(np.deg2rad(beta_end_deg))               # deep nadir (fitting region)
+
+    band_start = (z < z1)
+    band_deep  = (z < z2)
+
+    # not enough points -> return as-is
+    if band_deep.sum() < 500:
         return dist_erp
 
-    # nadir band 3D points (= noisy floor points) for fitting only
-    pts = dirs[mask] * dist[mask, None]
-    # SVD plane fit (least squares) to all nadir band points first (robustness)
-    n, d = _fit_plane_svd(pts)
+    # 1) fit plane on deep nadir points
+    pts = ddir[band_deep] * s[band_deep, None]           # [N,3]
+    c = pts.mean(axis=0, keepdims=True)
+    U, S, Vt = np.linalg.svd(pts - c, full_matrices=False)
+    n = Vt[-1]
+    d = -np.dot(n, c[0])
+    if n[2] < 0:  # make normal roughly +z
+        n = -n; d = -d
 
-    # inlier re-fitting for robustness (>500 inliers) with relative tolerance in ray-length space (RANSAC-like)
-    denom = (dirs[mask] @ n)
+    # 2) anchor plane d so that at the band boundary it matches original distance
+    deltas = []
+    for j in range(W):
+        col = band_start[:, j]
+        if not np.any(col):
+            continue
+        i0 = int(np.argmax(col))                         # first row in band
+        a = np.dot(ddir[i0, j], n)
+        if abs(a) < 1e-6:
+            continue
+        s_target = s[i0, j]                              # original boundary dist
+        # solve s_target = (-d - Δ)/a  -> Δ = -d - a*s_target
+        deltas.append(-d - a * s_target)
+    if len(deltas) > 0:
+        d = d + np.median(deltas)
+
+    # plane distances everywhere
+    denom = (ddir @ n)
     denom[np.abs(denom) < 1e-6] = 1e-6
-    s_on_plane = (-d) / denom
-    err = np.abs(s_on_plane - dist[mask]) / (np.maximum(dist[mask], 1e-6))
-    inl = err < inlier_tol
-    if inl.sum() > 500:
-        n, d = _fit_plane_svd(pts[inl])
+    s_plane = (-d) / denom                                # [H,W]
 
-    # correct all points below the plane
-    denom = (dirs @ n)
-    denom[np.abs(denom) < 1e-6] = 1e-6
-    s_all = (-d) / denom
-    dist_fixed = dist.copy()
-    dist_fixed[mask] = s_all[mask]
+    # 3) feather from boundary(z1) to deep(z2) using smoothstep
+    t = (z - z1) / (z2 - z1)                              # <=0 at boundary, >=1 deep
+    w = _smoothstep(torch.from_numpy(t)).numpy()          # [H,W] in [0,1]
+    s_blend = s * (1.0 - w) + s_plane * w
 
-    return torch.from_numpy(dist_fixed.reshape(H, W)).to(dist_erp.device, dist_erp.dtype)
+    # 4) optional cap so the plane never goes *too* far from the original at nadir
+    if rel_growth_cap is not None and rel_growth_cap > 0:
+        # cap per-column relative growth vs boundary value
+        for j in range(W):
+            col = band_start[:, j]
+            if not np.any(col):
+                continue
+            i0 = int(np.argmax(col))
+            s0 = s[i0, j] + 1e-6
+            cap = s0 * (1.0 + rel_growth_cap)
+            s_blend[i0:, j] = np.minimum(s_blend[i0:, j], cap)
+
+    out = torch.from_numpy(s_blend).to(dist_erp.device, dist_erp.dtype)
+    return out
+
+@torch.no_grad()
+def apply_nadir_monotone_cummax(dist_erp, pano_dirs, beta_thresh_deg=40):
+    """
+    Force distances to be non-decreasing toward nadir per azimuth column.
+    This removes residual local dips after plane blending.
+    """
+    assert dist_erp.dim() == 2
+    H, W = dist_erp.shape
+    z = pano_dirs[..., 2].cpu().numpy()
+    s = dist_erp.detach().cpu().numpy()
+    z1 = -np.sin(np.deg2rad(beta_thresh_deg))
+
+    for j in range(W):
+        col_mask = z[:, j] < z1
+        if not np.any(col_mask):
+            continue
+        # first row entering the nadir band
+        i0 = int(np.argmax(col_mask))
+        # monotone (non-decreasing) cumulative max toward the bottom
+        s[i0:, j] = np.maximum.accumulate(s[i0:, j])
+
+    return torch.from_numpy(s).to(dist_erp.device, dist_erp.dtype)
+
 # -------------------------------------------------------
 
 
@@ -481,10 +641,43 @@ class Scene:
             
             # NEW: floor-plane correction (use z-up in pano_dirs)
             pano_dirs = img_coord_to_pano_direction(img_coord_from_hw(height, width)).cuda()  # [H,W,3]
-            distances = enforce_floor_plane(distances.squeeze(), pano_dirs).unsqueeze(0)
-            
-            pts = pcd_from_depths(img, distances, height, width, args.source_path)
+            # distances = enforce_floor_plane_feather(distances.squeeze(0), pano_dirs).unsqueeze(0)
+            # 1) plane+feather
+            # --- replace this line in Scene.__init__ after geo_predictor(...) ---
+            # distances = enforce_floor_plane(distances.squeeze(), pano_dirs).unsqueeze(0)
 
+            # --- with this variant that also returns plane (n, d) ---
+            #dist_fixed, floor_n, floor_d = enforce_floor_plane(distances.squeeze(), pano_dirs, return_plane=True)
+            # distances = dist_fixed.unsqueeze(0)
+            # self.floor_plane = (floor_n, floor_d)  # store world-space plane
+            # --- 1) robust plane fit (wider nadir) ---
+            dist_hw = _to_hw(distances)  # -> [H,W]
+            dist_plane, n, d = enforce_floor_plane(
+                dist_hw, pano_dirs, beta_thresh_deg=55, inlier_tol=0.05, return_plane=True
+            )
+            self.floor_plane = (n, d)  # store plane (n, d) for training losses
+
+            # --- 2) feathered replace (stronger & wider) ---
+            # Use the anchored feather variant to avoid gaps at the band boundary
+            dist_hw = enforce_floor_plane_feather_anchored(
+                dist_plane, pano_dirs,
+                beta_start_deg=55.0,   # band 시작
+                beta_end_deg=80.0,     # 더 깊은 나딜에서 평면 피팅 영향
+                rel_growth_cap=0.35    # 과도한 증가 캡
+            )
+
+            # --- 3) hard clamp to plane in nadir (prevents bowl) ---
+            dist_hw = clip_to_plane(dist_hw, pano_dirs, n, d, beta_deg=55, slack=0.03)
+
+            # --- 4) column-wise monotone toward nadir ---
+            dist_hw = apply_nadir_monotone_cummax(dist_hw, pano_dirs, beta_thresh_deg=55)
+
+            # Pack back
+            distances = dist_hw.unsqueeze(0)
+
+            # Build PCD
+            pts = pcd_from_depths(img, distances, height, width, args.source_path)
+            
             print("Saving data for future use...")
             save_data(args.source_path, img, distances, rot_w2c, fx, fy, cx, cy, pers_imgs, pts)
 

@@ -1,3 +1,17 @@
+'''
+docker-compose run --rm dreamscene360 \
+  micromamba run -n dev \
+  python train.py \
+    -s "/workspace/DREAMSCENE360/data/living_room_woSink" \
+    -m "/workspace/DREAMSCENE360/output/living_room_woSink_ply" \
+    --pano_path "/workspace/DREAMSCENE360/data/living_room_woSink/inpainted_panorama.png" \
+    --no_perturb_loss \
+    --iterations 7000 \
+    --test_iterations 7000 \
+    --save_iterations 5000 7000
+'''
+
+
 #!/usr/bin/env python3
 #
 # Copyright (C) 2023, Inria
@@ -41,31 +55,120 @@ except ImportError:
 
 
 # === add near imports ===
+import math
 import torch.nn.functional as F
+from utils.graphics_utils import fov2focal
 
-# add once (top-level)
-def floor_normal_loss(z, band=0.15):
-    # z: [H,W] depth
-    H, W = z.shape
-    
-    dzdx = 0.5 * (z[:, 2:] - z[:, :-2])        # [H, W-2]
-    dzdy = 0.5 * (z[2:, :] - z[:-2, :])        # [H-2, W]
-    
-    # approx normal in camera space (assuming camera-space unit vectors are sufficient)
-    nx = -dzdx[1:-1, :]                        # [H-2, W-2]
-    ny = -dzdy[:, 1:-1]                        # [H-2, W-2]
-    nz = torch.ones_like(nx)                   # [H-2, W-2]  # constant normal z-component (approx) 
-    
-    n = torch.stack([nx, ny, nz], dim=-1)      # [H-2, W-2, 3]
+# --- helpers -------------------------------------------------
+def _get_hw(cam):
+    """Return (H, W) robustly from Camera."""
+    if hasattr(cam, "image_height") and hasattr(cam, "image_width"):
+        return int(cam.image_height), int(cam.image_width)
+    if hasattr(cam, "height") and hasattr(cam, "width"):
+        return int(cam.height), int(cam.width)
+    # fall back to tensor shape of original_image: [C,H,W]
+    return int(cam.original_image.shape[-2]), int(cam.original_image.shape[-1])
+
+def _get_fov(cam):
+    """Return (FoVx, FoVy) in radians; handle different attribute names."""
+    fovx = getattr(cam, "FoVx", getattr(cam, "FovX", None))
+    fovy = getattr(cam, "FoVy", getattr(cam, "FovY", None))
+    if fovx is None or fovy is None:
+        raise AttributeError("Camera is missing FoVx/FovX or FoVy/FovY.")
+    return float(fovx), float(fovy)
+
+def _view_dirs_cam(h, w, fx, fy, cx, cy, device, dtype):
+    """Make per-pixel camera-space unit rays [H,W,3]."""
+    jj, ii = torch.meshgrid(torch.arange(w, device=device),
+                            torch.arange(h, device=device),
+                            indexing='xy')
+    x = (jj.to(dtype) - cx) / fx
+    y = (ii.to(dtype) - cy) / fy
+    z = torch.ones_like(x, dtype=dtype)
+    d = torch.stack([x, y, z], dim=-1)
+    return d / (d.norm(dim=-1, keepdim=True) + 1e-8)
+# -------------------------------------------------------------
+
+def plane_depth_for_view(cam, plane, device):
+    """
+    Compute z-depth of a world-space plane for the given view.
+    plane: (n, d) where n is world normal, d is scalar in n·x + d = 0.
+    cam.R must be world<-cam (R_wc).
+    Returns: [H, W] z-depth in camera frame (torch).
+    """
+    dtype = torch.float32
+    H, W = _get_hw(cam)
+    FoVx, FoVy = _get_fov(cam)
+
+    fx = torch.tensor(fov2focal(FoVx, W), device=device, dtype=dtype)
+    fy = torch.tensor(fov2focal(FoVy, H), device=device, dtype=dtype)
+    cx = torch.tensor(0.5 * W, device=device, dtype=dtype)
+    cy = torch.tensor(0.5 * H, device=device, dtype=dtype)
+
+    d_cam = _view_dirs_cam(H, W, fx, fy, cx, cy, device, dtype)          # [H,W,3]
+    R_wc = torch.tensor(cam.R, device=device, dtype=dtype)               # [3,3]
+    d_w  = torch.einsum('ij,hwj->hwi', R_wc, d_cam)                      # [H,W,3]
+
+    n, d = plane
+    n = torch.tensor(n, device=device, dtype=dtype)                      # [3]
+    denom = (d_w @ n).clamp_min(1e-6)                                    # [H,W]
+    s = (-float(d)) / denom                                              # ray length to plane
+    z_plane = s * d_cam[..., 2]                                          # convert to z-depth
+    return z_plane
+
+def bottom_mask_for_view(cam, theta_deg=30, device='cuda'):
+    """
+    Build a boolean mask for “downward” rays in world coords (nadir band).
+    world up is +Z; select rays with d_world.z < -sin(theta).
+    """
+    dtype = torch.float32
+    H, W = _get_hw(cam)
+    FoVx, FoVy = _get_fov(cam)
+
+    fx = torch.tensor(fov2focal(FoVx, W), device=device, dtype=dtype)
+    fy = torch.tensor(fov2focal(FoVy, H), device=device, dtype=dtype)
+    cx = torch.tensor(0.5 * W, device=device, dtype=dtype)
+    cy = torch.tensor(0.5 * H, device=device, dtype=dtype)
+
+    d_cam = _view_dirs_cam(H, W, fx, fy, cx, cy, device, dtype)          # [H,W,3]
+    R_wc = torch.tensor(cam.R, device=device, dtype=dtype)
+    d_w  = torch.einsum('ij,hwj->hwi', R_wc, d_cam)                      # [H,W,3]
+
+    th = math.radians(theta_deg)
+    return d_w[..., 2] < -math.sin(th)
+
+
+def floor_normal_loss(z, band_ratio=0.18):
+    """
+    Encourage the nadir band to have near-up normals (flat floor).
+    Uses Sobel gradients with padding to preserve shape.
+    """
+    if z.dim() == 3 and z.shape[0] == 1:
+        z = z[0]                           # [H,W]
+
+    # Sobel kernels (shape-preserving via padding)
+    kx = torch.tensor([[-1,0,1],[-2,0,2],[-1,0,1]],
+                      device=z.device, dtype=z.dtype).view(1,1,3,3) / 8.0
+    ky = torch.tensor([[-1,-2,-1],[0,0,0],[1,2,1]],
+                      device=z.device, dtype=z.dtype).view(1,1,3,3) / 8.0
+    z4d = z[None,None,...]                 # [1,1,H,W]
+    gx = F.conv2d(z4d, kx, padding=1)[0,0] # [H,W]
+    gy = F.conv2d(z4d, ky, padding=1)[0,0] # [H,W]
+
+    # Approx surface normal = [-dx, -dy, 1], normalized
+    nx = -gx
+    ny = -gy
+    nz = torch.ones_like(z)
+    n = torch.stack([nx, ny, nz], dim=-1)
     n = n / (n.norm(dim=-1, keepdim=True) + 1e-6)
 
-    # Nadir(=bottom) band mask - bottom 15% of the image 
-    Hc, Wc = n.shape[:2]
-    hband = max(1, int(band * Hc))
-    mask = torch.zeros((Hc, Wc), dtype=torch.bool, device=z.device)
+    # Use only bottom band (nadir)
+    H = z.shape[0]
+    hband = max(1, int(band_ratio * H))
+    mask = torch.zeros_like(z, dtype=torch.bool)
     mask[-hband:, :] = True
-    
-    # maximize cos: n[..., up_axis-1].abs() -> minimize (1 - cos) 
+
+    # Align normals with +z (up): minimize (1 - |nz|)
     return (1.0 - n[..., 2].abs()[mask]).mean()
 
 
@@ -176,12 +279,27 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + depth_weight * loss_depth
 
         # new:
-        depth_weight = 0.20
+        depth_weight = 0.1
         loss_depth_main = ssi_depth_loss(rendered_depth, gt_depth) + 0.2 * grad_alignment_loss(rendered_depth, gt_depth)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + depth_weight * loss_depth_main
         
-        floor_w = 0.03  # adjust between 0.02~0.05
-        loss = loss + floor_w * floor_normal_loss(rendered_depth)
+        # --- Floor-plane hinge prior (keeps floor from sagging) ---
+        if hasattr(scene, "floor_plane") and scene.floor_plane is not None:
+            # where you compute the floor hinge loss
+            z_plane = plane_depth_for_view(viewpoint_cam, scene.floor_plane, image.device)
+            bmask  = bottom_mask_for_view(viewpoint_cam, theta_deg=55, device=image.device)  # was 30
+            margin = 0.03 * z_plane[bmask].mean().detach()  # was 0.01
+            hinge  = torch.relu(rendered_depth - (z_plane - margin))
+            floor_w = 0.30  # was 0.15
+            loss = loss + floor_w * hinge[bmask].mean()
+            def floor_laplacian(z):
+                k = torch.tensor([[0,1,0],[1,-4,1],[0,1,0]], device=z.device, dtype=z.dtype).view(1,1,3,3)
+                z4d = z[None,None,...]
+                return torch.abs(F.conv2d(z4d, k, padding=1))[0,0]
+            # add after hinge:
+            smooth_w = 0.05
+            loss += smooth_w * floor_laplacian(rendered_depth)[bmask].mean()
+        # ----------------------------------------------------------
         # === end of replace ===
 
         loss_feature = torch.tensor(0).cuda() 
