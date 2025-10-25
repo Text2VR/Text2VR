@@ -18,20 +18,11 @@ fi
 # ------------------------------
 
 # Define the scene name and prompt
-# SCENE_NAME="indoor_livingroom_compose"
-# PROMPT="A 360 equirectangular photo of a minimalist and spacious living room. In the center, there is a single modern leather sofa. The room has plain white walls, a smooth light gray concrete floor, and no other furniture or decorations. The scene is brightly lit by soft, natural light from a large window, with no harsh shadows. photorealistic, 8k, sharp focus."
-# SCENE_NAME="centerpiece_living_room"
-# PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
-# SCENE_NAME="centerpiece_living_room_wo_refinement"
-# PROMPT="A 360 equirectangular photo of a large, empty minimalist room. In the absolute center of the room, there is a single, modern, dark green fabric sofa. Next to the sofa stands one tall, black floor lamp. The room has plain white walls and a light oak wood floor. There is no other furniture or decorations. The scene is brightly lit by soft, even overhead lighting, creating no harsh shadows. photorealistic, 8k, sharp focus."
-# SCENE_NAME="simple_bedroom"
-# PROMPT="A 360 equirectangular photo of an extremely minimalist, tranquil bedroom interior. The room features only one single, modern wooden platform bed with a comfortable white mattress and soft, fluffy white bedding, centered against the back wall. Far away from the bed, on the opposite side of the room, there is one solitary small, simple square bedside table made of light, natural wood. The walls are plain, smooth, and painted in a very light, neutral beige color. The floor is covered with a uniform, light gray short-pile carpet. The space is completely devoid of any other furniture, decorations, lamps, windows, or architectural features like columns or doors. The room is softly and evenly illuminated by ambient light, creating a calm and expansive feeling with almost no shadows. photorealistic, 8k, ultra-sharp focus."
+# SCENE_NAME="park" 
+# PROMPT="A beautiful park with trees and one benche, one table, and a walking path, photorealistic, 8k, sharp focus"
+SCENE_NAME="living_room" 
+PROMPT="A modern living room with a sofa, a coffee table, a plant, and a window showing a cityscape, photorealistic, 8k, sharp focus"
 
-# SCENE_NAME="bedroom" <- good
-# PROMPT="A bedroom with a large bed and one beside table only with white wall and gray modern floor, photorealistic, 8k, sharp focus."
-SCENE_NAME="gallery_room2"
-#PROMPT="A gallery with two big art picture, white wall and white modern floor, flat lighting, photorealistic, 8k, sharp focus."
-PROMPT="A gallery with two big art pictures, white walls, and a white modern floor, lit by soft, even, diffuse light, creating no harsh shadows, photorealistic, 8k, sharp focus."
 
 # --- PATH DEFINITIONS (relative to Text2VR root) ---
 # Host paths
@@ -140,10 +131,13 @@ echo "================= STAGE 5: DREAMSCENE360 TRAIN ================="
 docker-compose run --rm dreamscene360 \
   micromamba run -n dev \
   python train.py \
-    -s "${HOST_SCENE_DIR}" \
+    -s "${CONTAINER_DS360_DATA_DIR}" \
     -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply" \
-    --pano_path "${HOST_PANO_IMAGE_PATH}" \
-    --no_perturb_loss
+    --pano_path "/workspace/DREAMSCENE360/data/${SCENE_NAME}/inpainted_panorama.png" \
+    --no_perturb_loss \
+    --iterations 7000 \
+    --test_iterations 7000 \
+    --save_iterations 5000 7000
 #   python train_ds360_only.py \
 #     -s "${CONTAINER_INPAINTED_DIR_FOR_TRAINING}" \
 #     -m "/workspace/DREAMSCENE360/output/${SCENE_NAME}_ply"

@@ -1,0 +1,1 @@
+Namespace(sh_degree=3, source_path='/workspace/DREAMSCENE360/data/living_room_woSink', model_path='/workspace/DREAMSCENE360/output/living_room_woSink_ply', images='images', resolution=-1, white_background=False, data_device='cuda', eval=False, pano_path='/workspace/DREAMSCENE360/data/living_room_woSink/inpainted_panorama.png')

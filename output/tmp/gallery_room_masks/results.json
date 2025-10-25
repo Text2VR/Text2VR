@@ -1,0 +1,19 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "art": [
+      {
+        "label": "art",
+        "score": 0.5778877139091492,
+        "box": [
+          553.9357299804688,
+          217.45309448242188,
+          667.2503051757812,
+          295.7923278808594
+        ],
+        "mask_saved_as": "masks/art.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}
