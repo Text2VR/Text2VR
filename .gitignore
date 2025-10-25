@@ -79,3 +79,5 @@ data/
 DREAMSCENE360/data/
 DREAMSCENE360/self_refinement/
 DREAMSCENE360/stitch_diffusion/output/
+.env
+node_modules/
