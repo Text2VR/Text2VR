@@ -1,0 +1,41 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "sofa": [
+      {
+        "label": "sofa",
+        "score": 0.5801737308502197,
+        "box": [
+          201.59803771972656,
+          268.0448913574219,
+          622.6950073242188,
+          425.7943420410156
+        ],
+        "mask_saved_as": "masks/sofa.png"
+      },
+      {
+        "label": "sofa",
+        "score": 0.30425381660461426,
+        "box": [
+          676.09375,
+          248.3594207763672,
+          1020.7271728515625,
+          410.12493896484375
+        ],
+        "mask_saved_as": "masks/sofa.png"
+      },
+      {
+        "label": "sofa",
+        "score": 0.25804001092910767,
+        "box": [
+          24.16048812866211,
+          272.1976013183594,
+          104.14126586914062,
+          364.2828674316406
+        ],
+        "mask_saved_as": "masks/sofa.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

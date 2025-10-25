@@ -63,39 +63,39 @@ RUN pip install --no-build-isolation git+https://github.com/NVlabs/tiny-cuda-nn/
 
 
 # --- Stage 3.5: Download Pretrained Models for Text-to-Panorama if they don't exist ---
-# This ensures that models are present without re-downloading them on every build.
-# RUN \
-#     SD_MODEL="stitch_diffusion/pretrained_model/stable-diffusion-2-1-base.safetensors" && \
-#     VAE_MODEL="stitch_diffusion/vae/stablediffusion.vae.pt" && \
-#     LORA_MODEL="stitch_diffusion/lora.safetensors" && \
-#     \
-#     mkdir -p stitch_diffusion/pretrained_model stitch_diffusion/vae && \
-#     \
-#     if [ ! -f "$SD_MODEL" ]; then \
-#         echo "--> Stable Diffusion model not found. Downloading..." && \
-#         wget https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors -O "$SD_MODEL"; \
-#     else \
-#         echo "--> Stable Diffusion model found. Skipping download."; \
-#     fi && \
-#     \
-#     if [ ! -f "$VAE_MODEL" ]; then \
-#         echo "--> VAE model not found. Downloading..." && \
-#         wget https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt -O "$VAE_MODEL"; \
-#     else \
-#         echo "--> VAE model found. Skipping download."; \
-#     fi && \
-#     \
-#     if [ ! -f "$LORA_MODEL" ]; then \
-#         echo "--> LoRA model not found. Running download script..." && \
-#         cd stitch_diffusion && python download_lora.py && cd ..; \
-#     else \
-#         echo "--> LoRA model found. Skipping download."; \
-#     fi
+#This ensures that models are present without re-downloading them on every build.
+RUN \
+    SD_MODEL="stitch_diffusion/pretrained_model/stable-diffusion-2-1-base.safetensors" && \
+    VAE_MODEL="stitch_diffusion/vae/stablediffusion.vae.pt" && \
+    LORA_MODEL="stitch_diffusion/lora.safetensors" && \
+    \
+    mkdir -p stitch_diffusion/pretrained_model stitch_diffusion/vae && \
+    \
+    if [ ! -f "$SD_MODEL" ]; then \
+        echo "--> Stable Diffusion model not found. Downloading..." && \
+        wget https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors -O "$SD_MODEL"; \
+    else \
+        echo "--> Stable Diffusion model found. Skipping download."; \
+    fi && \
+    \
+    if [ ! -f "$VAE_MODEL" ]; then \
+        echo "--> VAE model not found. Downloading..." && \
+        wget https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt -O "$VAE_MODEL"; \
+    else \
+        echo "--> VAE model found. Skipping download."; \
+    fi && \
+    \
+    if [ ! -f "$LORA_MODEL" ]; then \
+        echo "--> LoRA model not found. Running download script..." && \
+        cd stitch_diffusion && python download_lora.py && cd ..; \
+    else \
+        echo "--> LoRA model found. Skipping download."; \
+    fi
 
 # Compile the SIBR viewer
-# RUN cd SIBR_viewers && \
-#     (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release -G Ninja && ninja -C build install -j$(nproc)) || \
-#     (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc) --target install)
+RUN cd SIBR_viewers && \
+    (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release -G Ninja && ninja -C build install -j$(nproc)) || \
+    (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc) --target install)
 
 # --- Stage 4: Finalization ---
 # Add auto-activation to the bash startup script for interactive sessions

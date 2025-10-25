@@ -61,6 +61,10 @@ echo "--> Building all services..."
 # docker-compose build                                                ### (optional)
 # --------------------------------------------------------------
 
+echo "================= STAGE 1: PANORAMA GEN (API) ================="
+mkdir -p "${HOST_SCENE_DIR}"
+echo "${PROMPT}" > "${HOST_SCENE_DIR}/prompt.txt"
+
 echo "================= STAGE 1: PANORAMA GEN ================="
 mkdir -p "${HOST_SCENE_DIR}"
 echo "${PROMPT}" > "${HOST_SCENE_DIR}/prompt.txt"
@@ -76,6 +80,33 @@ docker-compose run --rm dreamscene360 \
     --max_rounds 2
 
 test -f "${HOST_PANO_IMAGE_PATH}" || { echo "❌ Panorama generation failed"; exit 1; }
+
+# echo "================= STAGE 1: PANORAMA GEN (API) ================="
+# mkdir -p "${HOST_SCENE_DIR}"
+# echo "${PROMPT}" > "${HOST_SCENE_DIR}/prompt.txt"
+
+# Start panorama API service if not running
+# echo "🔄 Ensuring panorama-api service is running..."
+# docker compose up -d panorama-api
+
+# Wait for service to be ready
+# echo "⏳ Waiting for API service to start..."
+# for i in {1..30}; do
+#  if curl -s http://localhost:8001/health > /dev/null; then
+#     echo "✅ API service is ready"
+#     break
+#   fi
+#   if [ $i -eq 30 ]; then
+#     echo "❌ API service failed to start"
+#     exit 1
+#   fi
+#   sleep 2
+# done
+
+# Call API to generate panorama
+# echo "🎨 Calling panorama generation API..."
+# python3 api_client.py "${PROMPT}" "${SCENE_NAME}" true 1 2
+#test -f "${HOST_PANO_IMAGE_PATH}" || { echo "❌ Panorama generation failed"; exit 1; }
 
 echo "================= STAGE 2: ASSET SEG ================="
 # NOTE: We pass the key explicitly to guarantee GPT usage inside the container.

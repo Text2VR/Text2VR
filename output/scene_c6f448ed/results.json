@@ -1,0 +1,80 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "sofa": [
+      {
+        "label": "sofa",
+        "score": 0.8184359669685364,
+        "box": [
+          670.7234497070312,
+          288.9270324707031,
+          931.3893432617188,
+          410.3048400878906
+        ],
+        "mask_saved_as": "masks/sofa.png"
+      }
+    ],
+    "armchair": [
+      {
+        "label": "armchair",
+        "score": 0.22966817021369934,
+        "box": [
+          113.17935180664062,
+          299.9862060546875,
+          196.08767700195312,
+          346.40606689453125
+        ],
+        "mask_saved_as": "masks/armchair.png"
+      }
+    ],
+    "side table": [
+      {
+        "label": "side table",
+        "score": 0.2692272663116455,
+        "box": [
+          184.9059295654297,
+          274.664306640625,
+          573.7564697265625,
+          422.9451904296875
+        ],
+        "mask_saved_as": "masks/side_table.png"
+      },
+      {
+        "label": "side table",
+        "score": 0.22857940196990967,
+        "box": [
+          0.646550178527832,
+          314.2946472167969,
+          32.49894332885742,
+          367.4534606933594
+        ],
+        "mask_saved_as": "masks/side_table.png"
+      }
+    ],
+    "plant": [
+      {
+        "label": "plant",
+        "score": 0.35418617725372314,
+        "box": [
+          579.2514038085938,
+          183.21351623535156,
+          647.6572875976562,
+          315.92059326171875
+        ],
+        "mask_saved_as": "masks/plant.png"
+      },
+      {
+        "label": "plant",
+        "score": 0.23336994647979736,
+        "box": [
+          0.731414794921875,
+          256.4495544433594,
+          37.79070281982422,
+          330.0412902832031
+        ],
+        "mask_saved_as": "masks/plant.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}
