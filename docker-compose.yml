@@ -3,6 +3,9 @@ version: '3.8'
 services:
   # Panorama Generation API
   panorama-api:
+    build:
+      context: ./DREAMSCENE360           
+      dockerfile: Dockerfile
     image: text2vr-dreamscene360:latest
     container_name: text2vr_panorama_api
     working_dir: /workspace/DREAMSCENE360
@@ -32,6 +35,9 @@ services:
 
   # Segmentation API
   segmentation-api:
+    build:
+      context: ./ASSET_SEG
+      dockerfile: Dockerfile
     image: text2vr-asset_seg:latest
     container_name: text2vr_segmentation_api
     working_dir: /app
@@ -66,6 +72,9 @@ services:
 
   # Background Inpainting API
   inpainting-api:
+    build:
+      context: ./BG_INPAINT
+      dockerfile: Dockerfile
     image: text2vr-bg_inpaint:latest
     container_name: text2vr_inpainting_api
     working_dir: /workspace
