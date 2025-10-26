@@ -68,4 +68,16 @@ Thumbs.db
 ehthumbs.db
 
 # Ignore local environment variables file
+.envnode_modules/
+web-dist/
+output/
+stitch_output/
+seged_assets/
+inpainted_pano/
+masking_output/
+data/
+DREAMSCENE360/data/
+DREAMSCENE360/self_refinement/
+DREAMSCENE360/stitch_diffusion/output/
 .env
+node_modules/

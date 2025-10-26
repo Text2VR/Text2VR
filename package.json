@@ -1,0 +1,35 @@
+{
+  "name": "text2vr",
+  "version": "1.0.0",
+  "description": "Create an interactive VR scene from **a single text prompt**.   Text2VR orchestrates multiple AI components with **Docker Compose** so you can reproduce builds and keep dependencies isolated and stable.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Text2VR/Text2VR.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Text2VR/Text2VR/issues"
+  },
+  "homepage": "https://github.com/Text2VR/Text2VR#readme",
+  "dependencies": {
+    "@types/aframe": "^1.2.8",
+    "@types/node": "^24.3.1",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "aframe": "^1.7.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  }
+}

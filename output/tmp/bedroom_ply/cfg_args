@@ -1,1 +1,0 @@
-Namespace(sh_degree=3, source_path='/workspace/DREAMSCENE360/data/bedroom/for_training', model_path='/workspace/DREAMSCENE360/output/bedroom_ply', images='images', resolution=-1, white_background=False, data_device='cuda', eval=False)

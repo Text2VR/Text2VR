@@ -10,4 +10,8 @@ numpy==1.26.4
 Pillow==10.0.0
 opencv-python-headless==4.11.0.86
 
+# --- API ---
+fastapi==0.115.5
+uvicorn[standard]==0.34.0
+
 # torch/torchvision? -> from base image (pytorch:2.4.0-cuda12.4)

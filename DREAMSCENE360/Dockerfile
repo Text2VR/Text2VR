@@ -77,7 +77,7 @@ RUN pip install --no-build-isolation git+https://github.com/NVlabs/tiny-cuda-nn/
 #     else \
 #         echo "--> Stable Diffusion model found. Skipping download."; \
 #     fi && \
-#     \
+#    \
 #     if [ ! -f "$VAE_MODEL" ]; then \
 #         echo "--> VAE model not found. Downloading..." && \
 #         wget https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt -O "$VAE_MODEL"; \
@@ -93,9 +93,9 @@ RUN pip install --no-build-isolation git+https://github.com/NVlabs/tiny-cuda-nn/
 #     fi
 
 # Compile the SIBR viewer
-# RUN cd SIBR_viewers && \
-#     (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release -G Ninja && ninja -C build install -j$(nproc)) || \
-#     (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc) --target install)
+RUN cd SIBR_viewers && \
+    (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release -G Ninja && ninja -C build install -j$(nproc)) || \
+    (cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc) --target install)
 
 # --- Stage 4: Finalization ---
 # Add auto-activation to the bash startup script for interactive sessions
