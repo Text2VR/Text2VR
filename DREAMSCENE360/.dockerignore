@@ -1,0 +1,17 @@
+# ignore heavy & generated stuff
+output/
+pre_checkpoints/
+__pycache__/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.log
+*.tmp
+.git/
+.gitignore
+self_refinement/
+candidates/
+*.png
+*.jpg
+*.jpeg

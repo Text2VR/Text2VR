@@ -1,0 +1,32 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "art": [
+      {
+        "label": "art",
+        "score": 0.6990905404090881,
+        "box": [
+          553.0408325195312,
+          218.34364318847656,
+          666.6322631835938,
+          298.1692810058594
+        ],
+        "mask_saved_as": "masks/art.png"
+      }
+    ],
+    "sculpture": [
+      {
+        "label": "sculpture",
+        "score": 0.20006924867630005,
+        "box": [
+          146.04177856445312,
+          82.61247253417969,
+          319.6729736328125,
+          374.3260498046875
+        ],
+        "mask_saved_as": "masks/sculpture.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

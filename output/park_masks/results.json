@@ -1,0 +1,19 @@
+{
+  "image": "panorama.png",
+  "prompts": {
+    "bench": [
+      {
+        "label": "bench",
+        "score": 0.9600964188575745,
+        "box": [
+          681.1319580078125,
+          291.37713623046875,
+          912.4754638671875,
+          400.55096435546875
+        ],
+        "mask_saved_as": "masks/bench.png"
+      }
+    ]
+  },
+  "visualization": "visualizations/panorama_visualization.png"
+}

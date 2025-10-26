@@ -17,6 +17,14 @@ pre_checkpoints/
 *.bin
 *.h5
 
+# ===== HF / model caches =====
+cache/
+**/.cache/
+**/.locks/
+**/huggingface/
+**/hf_cache/
+**/models--*/        # huggingface model dirs
+
 # Large binary files and viewers
 # SIBR_viewers/
 # viewer_windows/
@@ -58,3 +66,6 @@ assets/large_files/
 # OS generated files
 Thumbs.db
 ehthumbs.db
+
+# Ignore local environment variables file
+.env
