@@ -3,22 +3,38 @@
 Segmentation API Client for Text2VR pipeline
 """
 
-import requests
-import time
 import json
-from typing import Optional, Dict, Any
+import time
+from typing import Dict, Optional, Any
+
+import requests
+
+from .defaults import SEGMENTATION_DEFAULTS
+
 
 class SegmentationAPIClient:
     def __init__(self, base_url: str = "http://localhost:8002"):
         self.base_url = base_url
-        
-    def segment_panorama(self, panorama_path: str, scene_name: str) -> Dict[str, Any]:
+
+    def segment_panorama(
+        self,
+        panorama_path: str,
+        scene_name: str,
+        sam_checkpoint: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        box_threshold: Optional[float] = None,
+        text_threshold: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """Segment panorama and return the results"""
-        
+
         # Start segmentation task
         response = requests.post(f"{self.base_url}/segment", json={
             "panorama_path": panorama_path,
-            "scene_name": scene_name
+            "scene_name": scene_name,
+            "sam_checkpoint": sam_checkpoint or SEGMENTATION_DEFAULTS.sam_checkpoint,
+            "openai_api_key": openai_api_key or SEGMENTATION_DEFAULTS.openai_api_key,
+            "box_threshold": box_threshold if box_threshold is not None else SEGMENTATION_DEFAULTS.box_threshold,
+            "text_threshold": text_threshold if text_threshold is not None else SEGMENTATION_DEFAULTS.text_threshold
         })
         response.raise_for_status()
         

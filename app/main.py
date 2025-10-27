@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .api.panorama import router as panorama_router
+from .api.unity_assets import router as unity_assets_router
 from .services.panorama_service import panorama_service
 
 
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     
     # Include routers
     app.include_router(panorama_router)
+    app.include_router(unity_assets_router)
     
     # Static files for web frontend
     web_dist_dir = Path(__file__).parent.parent / "web-dist"

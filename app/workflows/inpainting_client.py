@@ -3,8 +3,11 @@ Inpainting API Client for LangGraph workflows
 """
 
 import time
+from typing import Dict, Optional, Any
+
 import requests
-from typing import Optional, Dict, Any
+
+from .defaults import INPAINTING_DEFAULTS
 
 
 class InpaintingAPIClient:
@@ -24,19 +27,19 @@ class InpaintingAPIClient:
         panorama_path: str,
         mask_dir: str,
         scene_name: str,
-        model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
-        prompt: str = "clean empty interior background, seamless walls and floor, photorealistic, matching lighting, no new objects",
-        neg_prompt: str = "sofa, couch, armchair, chair, bench, text, watermark, logo, artifacts, distortion, blurry, people, signature",
-        strength: float = 0.94,
-        guidance: float = 5.0,
-        steps: int = 40,
+        model_id: Optional[str] = None,
+        prompt: Optional[str] = None,
+        neg_prompt: Optional[str] = None,
+        strength: Optional[float] = None,
+        guidance: Optional[float] = None,
+        steps: Optional[int] = None,
         wrap_pad: Optional[int] = None,
         dilate: Optional[int] = None,
-        feather: int = 0,
-        erase: str = "gray",
-        seed: int = 0,
-        poll_interval: int = 5,
-        timeout: int = 600
+        feather: Optional[int] = None,
+        erase: Optional[str] = None,
+        seed: Optional[int] = None,
+        poll_interval: Optional[int] = None,
+        timeout: Optional[int] = None
     ) -> str:
         """
         파노라마 인페인팅을 요청하고 결과 경로를 반환합니다.
@@ -73,17 +76,17 @@ class InpaintingAPIClient:
             "panorama_path": panorama_path,
             "mask_dir": mask_dir,
             "scene_name": scene_name,
-            "model_id": model_id,
-            "prompt": prompt,
-            "neg_prompt": neg_prompt,
-            "strength": strength,
-            "guidance": guidance,
-            "steps": steps,
-            "wrap_pad": wrap_pad,
-            "dilate": dilate,
-            "feather": feather,
-            "erase": erase,
-            "seed": seed
+            "model_id": model_id or INPAINTING_DEFAULTS.model_id,
+            "prompt": prompt or INPAINTING_DEFAULTS.prompt,
+            "neg_prompt": neg_prompt or INPAINTING_DEFAULTS.neg_prompt,
+            "strength": strength if strength is not None else INPAINTING_DEFAULTS.strength,
+            "guidance": guidance if guidance is not None else INPAINTING_DEFAULTS.guidance,
+            "steps": steps if steps is not None else INPAINTING_DEFAULTS.steps,
+            "wrap_pad": wrap_pad if wrap_pad is not None else INPAINTING_DEFAULTS.wrap_pad,
+            "dilate": dilate if dilate is not None else INPAINTING_DEFAULTS.dilate,
+            "feather": feather if feather is not None else INPAINTING_DEFAULTS.feather,
+            "erase": erase or INPAINTING_DEFAULTS.erase,
+            "seed": seed if seed is not None else INPAINTING_DEFAULTS.seed
         }
 
         print(f"📤 Sending inpainting request for {scene_name}...")
@@ -102,8 +105,9 @@ class InpaintingAPIClient:
         start_time = time.time()
         while True:
             elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise TimeoutError(f"Inpainting timed out after {timeout}s")
+            current_timeout = timeout if timeout is not None else INPAINTING_DEFAULTS.timeout
+            if elapsed > current_timeout:
+                raise TimeoutError(f"Inpainting timed out after {current_timeout}s")
 
             # 상태 확인
             status_response = requests.get(
@@ -129,7 +133,7 @@ class InpaintingAPIClient:
                 raise RuntimeError(f"Inpainting failed: {message}")
 
             elif status in ("queued", "processing"):
-                time.sleep(poll_interval)
+                time.sleep(poll_interval if poll_interval is not None else INPAINTING_DEFAULTS.poll_interval)
                 continue
 
             else:
