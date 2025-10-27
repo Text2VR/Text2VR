@@ -20,6 +20,8 @@ class SegmentationDefaults:
     # Basic segmentation parameters
     sam_checkpoint: str = "/app/checkpoints/sam_vit_h_4b8939.pth"
     openai_api_key: Optional[str] = None
+    '''
+    """according to `run_pipeline.sh` -> no params needed except basci pathways"""
     box_threshold: float = 0.20
     text_threshold: float = 0.15
 
@@ -47,7 +49,7 @@ class SegmentationDefaults:
     # Wrap mask merge & cleanup
     min_region_ratio: float = 0.001
     close_kernel: int = 7
-
+    '''
 
 @dataclass(frozen=True)
 class InpaintingDefaults:
@@ -58,17 +60,18 @@ class InpaintingDefaults:
     result_prefix: str = "/workspace/inpainted_pano/"
 
     # Model parameters (aligned with API server)
-    model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+    # model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+    model_id: str = "stabilityai/stable-diffusion-2-inpainting"
     prompt: str = "clean empty interior background, seamless walls and floor, photorealistic, matching lighting, no new objects"
-    neg_prompt: str = "sofa, couch, armchair, chair, bench, text, watermark, logo, artifacts, distortion, blurry, people, signature"
-    strength: float = 0.94  # Aligned with API server
-    guidance: float = 5.0   # Aligned with API server
+    neg_prompt: str = "sofa, couch, armchair, chair, bench, text, watermark, logo, artifacts, distortion, blurry, people, signature, pillow, objects, furniture, plant, tree, lamp"
+    strength: float = 0.95  # Aligned with API server
     steps: int = 40
-    wrap_pad: Optional[int] = None
-    dilate: Optional[int] = None
-    feather: int = 0        # Aligned with API server
-    erase: str = "gray"
-    seed: int = 0           # Aligned with API server
+    #wrap_pad: Optional[int] = None
+    #dilate: Optional[int] = None
+    # feather: int = 0        # Aligned with API server
+    feather: int = 1        # Aligned with API server
+    #erase: str = "gray"
+    seed: int = 42 # seed: int = 0           # Aligned with API server
 
     # Client-only parameters
     poll_interval: int = 5
@@ -82,11 +85,18 @@ class GaussianDefaults:
     container_path_prefix: str = "/workspace/"
 
     # Training parameters (aligned with API server)
-    iterations: int = 100
-    save_iterations: List[int] = field(default_factory=lambda: [50, 100])  # Aligned with API server
-    white_background: bool = False
-    sh_degree: int = 3
-    gen_res: int = 512
+    # iterations: int = 100
+    iterations: int = 7000
+    # save_iterations: List[int] = field(default_factory=lambda: [50, 100])  # Aligned with API server
+    save_iterations: List[int] = field(default_factory=lambda: [5000, 7000])
+    """
+    --test_iterations 7000
+    no_perturb_loss <--- NEED  ~~~!!!!!
+    """
+    
+    # white_background: bool = False
+    # sh_degree: int = 3
+    # gen_res: int = 512
 
     # Client-only parameters
     request_timeout: int = 10000
@@ -95,9 +105,9 @@ class GaussianDefaults:
 @dataclass(frozen=True)
 class PanoramaDefaults:
     # Panorama generation parameters (aligned with API server)
-    use_self_refinement: bool = False
-    num_prompt: int = 3
-    max_rounds: int = 3
+    use_self_refinement: bool = True
+    num_prompt: int = 2
+    max_rounds: int = 2
 
     # Client-only parameters
     poll_interval: int = 5
