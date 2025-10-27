@@ -13,52 +13,118 @@ from typing import Dict, List, Optional
 
 @dataclass(frozen=True)
 class SegmentationDefaults:
+    # Path conversion
     panorama_path_prefix: str = "/home/capstoneproj0310/Text2VR/data/"
     container_path_prefix: str = "/app/host_data/"
+
+    # Basic segmentation parameters
     sam_checkpoint: str = "/app/checkpoints/sam_vit_h_4b8939.pth"
     openai_api_key: Optional[str] = None
     box_threshold: float = 0.20
     text_threshold: float = 0.15
 
+    # Advanced segmentation parameters
+    max_prompts: int = 12
+    anchor_enable: bool = True
+    min_area_ratio: float = 0.00025
+    max_area_ratio: float = 0.7
+
+    # Exclusion controls
+    exclusion_use_mask: bool = True
+    exclusion_mask_dilate_px: int = 5
+    exclusion_overlap_drop: float = 0.35
+    exclusion_box_th: float = 0.15
+    exclusion_text_th: float = 0.15
+    exclusion_pad_ratio: float = 0.05
+
+    # Wrap NMS
+    wrap_nms_iou: float = 0.3
+
+    # Floor filter
+    enable_floor_filter: bool = False
+    floor_band_ratio: float = 0.40
+
+    # Wrap mask merge & cleanup
+    min_region_ratio: float = 0.001
+    close_kernel: int = 7
+
 
 @dataclass(frozen=True)
 class InpaintingDefaults:
+    # Path conversion
     panorama_path_prefix: str = "/home/capstoneproj0310/Text2VR/data/"
     container_path_prefix: str = "/workspace/data/"
     mask_dir_prefix: str = "/workspace/masking_output/"
     result_prefix: str = "/workspace/inpainted_pano/"
 
+    # Model parameters (aligned with API server)
     model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
-    prompt: str = (
-        "a clean empty room background, photorealistic, seamless texture, 8k, sharp focus"
-    )
-    neg_prompt: str = (
-        "objects, furniture, sofa, picture, chair, plant, lamp, table, blurry, hazy, watermark, text, signature, pillow"
-    )
-    strength: float = 0.95
-    guidance: float = 7.5
+    prompt: str = "clean empty interior background, seamless walls and floor, photorealistic, matching lighting, no new objects"
+    neg_prompt: str = "sofa, couch, armchair, chair, bench, text, watermark, logo, artifacts, distortion, blurry, people, signature"
+    strength: float = 0.94  # Aligned with API server
+    guidance: float = 5.0   # Aligned with API server
     steps: int = 40
     wrap_pad: Optional[int] = None
     dilate: Optional[int] = None
-    feather: int = 1
+    feather: int = 0        # Aligned with API server
     erase: str = "gray"
-    seed: int = 42
+    seed: int = 0           # Aligned with API server
+
+    # Client-only parameters
     poll_interval: int = 5
     timeout: int = 600
 
 
 @dataclass(frozen=True)
 class GaussianDefaults:
+    # Path conversion
     panorama_path_prefix: str = "/home/capstoneproj0310/Text2VR/"
     container_path_prefix: str = "/workspace/"
+
+    # Training parameters (aligned with API server)
     iterations: int = 100
-    save_iterations: List[int] = field(default_factory=lambda: [50, 70])
+    save_iterations: List[int] = field(default_factory=lambda: [50, 100])  # Aligned with API server
     white_background: bool = False
     sh_degree: int = 3
     gen_res: int = 512
+
+    # Client-only parameters
     request_timeout: int = 10000
+
+
+@dataclass(frozen=True)
+class PanoramaDefaults:
+    # Panorama generation parameters (aligned with API server)
+    use_self_refinement: bool = False
+    num_prompt: int = 3
+    max_rounds: int = 3
+
+    # Client-only parameters
+    poll_interval: int = 5
+    timeout: int = 600
+
+
+@dataclass(frozen=True)
+class TrellisDefaults:
+    # Path conversion
+    host_path_prefix: str = "/home/capstoneproj0310/Text2VR/seged_assets/"
+    container_path_prefix: str = "/app/seged_assets/"
+
+    # 3D generation parameters (aligned with API server)
+    seed: int = 42
+    simplify: float = 0.95
+    texture_size: int = 1024
+    ss_guidance_strength: float = 7.5
+    ss_sampling_steps: int = 12
+    slat_guidance_strength: float = 3.0
+    slat_sampling_steps: int = 12
+
+    # Client-only parameters
+    timeout: int = 120
 
 
 SEGMENTATION_DEFAULTS = SegmentationDefaults()
 INPAINTING_DEFAULTS = InpaintingDefaults()
 GAUSSIAN_DEFAULTS = GaussianDefaults()
+PANORAMA_DEFAULTS = PanoramaDefaults()
+TRELLIS_DEFAULTS = TrellisDefaults()

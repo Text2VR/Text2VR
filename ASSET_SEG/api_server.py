@@ -28,12 +28,40 @@ tasks = {}
 WORKING_DIR = "/app/output"
 
 class SegmentationRequest(BaseModel):
+    # Required fields
     panorama_path: str
     scene_name: str
+
+    # Basic segmentation parameters
     sam_checkpoint: str = "/app/checkpoints/sam_vit_h_4b8939.pth"
     openai_api_key: Optional[str] = None
     box_threshold: float = 0.20
     text_threshold: float = 0.15
+
+    # Advanced segmentation parameters
+    max_prompts: int = 12
+    anchor_enable: bool = True
+    min_area_ratio: float = 0.00025
+    max_area_ratio: float = 0.7
+
+    # Exclusion controls
+    exclusion_use_mask: bool = True
+    exclusion_mask_dilate_px: int = 5
+    exclusion_overlap_drop: float = 0.35
+    exclusion_box_th: float = 0.15
+    exclusion_text_th: float = 0.15
+    exclusion_pad_ratio: float = 0.05
+
+    # Wrap NMS
+    wrap_nms_iou: float = 0.3
+
+    # Floor filter
+    enable_floor_filter: bool = False
+    floor_band_ratio: float = 0.40
+
+    # Wrap mask merge & cleanup
+    min_region_ratio: float = 0.001
+    close_kernel: int = 7
 
 class SegmentationResponse(BaseModel):
     task_id: str
@@ -68,27 +96,27 @@ def segment_task(task_id: str, request: SegmentationRequest):
             openai_api_key=request.openai_api_key or os.getenv("OPENAI_API_KEY"),
             box_threshold=request.box_threshold,
             text_threshold=request.text_threshold,
-            # Add other default values that might be needed
+            # Use request values instead of hardcoded defaults
             labels=None,
-            max_prompts=12,  # Default from segment_panorama.py
-            anchor_enable=True,
-            min_area_ratio=0.00025,
-            max_area_ratio=0.7,
+            max_prompts=request.max_prompts,
+            anchor_enable=request.anchor_enable,
+            min_area_ratio=request.min_area_ratio,
+            max_area_ratio=request.max_area_ratio,
             # Exclusion controls
-            exclusion_use_mask=True,
-            exclusion_mask_dilate_px=5,
-            exclusion_overlap_drop=0.35,
-            exclusion_box_th=0.15,
-            exclusion_text_th=0.15,
-            exclusion_pad_ratio=0.05,
+            exclusion_use_mask=request.exclusion_use_mask,
+            exclusion_mask_dilate_px=request.exclusion_mask_dilate_px,
+            exclusion_overlap_drop=request.exclusion_overlap_drop,
+            exclusion_box_th=request.exclusion_box_th,
+            exclusion_text_th=request.exclusion_text_th,
+            exclusion_pad_ratio=request.exclusion_pad_ratio,
             # Wrap NMS
-            wrap_nms_iou=0.3,
+            wrap_nms_iou=request.wrap_nms_iou,
             # Floor filter
-            enable_floor_filter=False,
-            floor_band_ratio=0.40,
+            enable_floor_filter=request.enable_floor_filter,
+            floor_band_ratio=request.floor_band_ratio,
             # Wrap mask merge & cleanup
-            min_region_ratio=0.001,
-            close_kernel=7
+            min_region_ratio=request.min_region_ratio,
+            close_kernel=request.close_kernel
         )
         
         # Call the main segmentation function

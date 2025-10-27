@@ -13,11 +13,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..config import settings
-from .api_client import PanoramaAPIClient
+from .pano_client import PanoramaAPIClient
 from .defaults import (
     GAUSSIAN_DEFAULTS,
     INPAINTING_DEFAULTS,
+    PANORAMA_DEFAULTS,
     SEGMENTATION_DEFAULTS,
+    TRELLIS_DEFAULTS,
 )
 from .segmentation_client import SegmentationAPIClient
 from .inpainting_client import InpaintingAPIClient
@@ -406,8 +408,8 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
                 result_path = client.generate_3d_asset(
                     image_path=image_path,
                     asset_name=asset_name,
-                    output_path=output_path,
-                    timeout=120  # 2분 타임아웃
+                    output_path=output_path
+                    # timeout은 TRELLIS_DEFAULTS에서 관리됨
                 )
 
                 asset_3d_paths[asset_name] = result_path

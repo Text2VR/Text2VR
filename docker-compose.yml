@@ -6,7 +6,7 @@ services:
     # build:
     #  context: ./DREAMSCENE360           
     #  dockerfile: Dockerfile
-    image: text2vr-dreamscene360:latest
+    image: 0in11/text2vr-dreamscene360:latest
     container_name: text2vr_panorama_api
     working_dir: /workspace/DREAMSCENE360
     ports:
@@ -38,7 +38,7 @@ services:
     # build:
     #   context: ./ASSET_SEG
     #  dockerfile: Dockerfile
-    image: text2vr-asset_seg:latest
+    image: 0in11/text2vr-asset_seg:latest
     container_name: text2vr_segmentation_api
     working_dir: /app
     ports:
@@ -75,7 +75,7 @@ services:
     # build:
     #  context: ./BG_INPAINT
     #  dockerfile: Dockerfile
-    image: text2vr-bg_inpaint:latest
+    image: 0in11/text2vr-bg_inpaint:latest
     container_name: text2vr_inpainting_api
     working_dir: /workspace
     ports:
@@ -111,7 +111,7 @@ services:
 
   # TRELLIS 3D Asset Generation API
   trellis-api:
-    image: trellis:v1
+    image: 0in11/trellis:v1
     container_name: text2vr_trellis_api
     working_dir: /app
     ports:
