@@ -113,8 +113,8 @@ export const App: React.FC = () => {
 
   return (
     <div className="app">
-      <div className="container">
-        <h1 className="title">Text2VR</h1>
+      <div className="container" style={{textAlign: "center"}}>
+        <img src="../src/logo/logo.png" style={{width:"200px", margin:"0 auto", marginBottom:"30px"}} />
         
         <InputForm 
           onSubmit={handleGenerate}

@@ -47,14 +47,19 @@ class PanoramaService:
                 "Rewriting query with AI..."
             )
             
-            result_path = await self._run_langgraph_workflow(task_id, request)
-            
+            result_state = await self._run_langgraph_workflow(task_id, request)
+            result_path = result_state.get("panorama_path") if result_state else None
+            asset_3d_paths = result_state.get("asset_3d_paths") if result_state else None
+            ply_path = result_state.get("ply_path") if result_state else None
+
             if result_path and os.path.exists(result_path):
                 task_manager.update_task_status(
                     task_id,
                     TaskStatus.COMPLETED,
                     "Panorama generation completed successfully",
-                    panorama_path=result_path
+                    panorama_path=result_path,
+                    asset_3d_paths=asset_3d_paths,
+                    ply_path=ply_path
                 )
                 logger.info(f"Task {task_id} completed: {result_path}")
             else:
@@ -90,7 +95,7 @@ class PanoramaService:
         logger.warning("DreamScene360 API is not running. Please ensure docker-compose services are started.")
         logger.info("Continuing with workflow - external API calls may fail if services are not available")
     
-    async def _run_langgraph_workflow(self, task_id: str, request: PanoramaRequest) -> Optional[str]:
+    async def _run_langgraph_workflow(self, task_id: str, request: PanoramaRequest) -> Optional[dict]:
         """Run the LangGraph workflow"""
         try:
             # Import LangGraph workflow
@@ -142,7 +147,7 @@ class PanoramaService:
             )
 
             logger.info(f"LangGraph workflow completed for task {task_id}")
-            return result.get("panorama_path")
+            return result
             
         except ImportError as e:
             logger.error(f"Failed to import LangGraph workflow: {e}")

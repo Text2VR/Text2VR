@@ -66,6 +66,8 @@ async def get_task_status(task_id: str):
         segmentation_visualization_path=task.segmentation_visualization_path,
         inpainted_panorama_path=task.inpainted_panorama_path,
         scene_name=task.scene_name,
+        asset_3d_paths=task.asset_3d_paths,
+        ply_path=task.ply_path,
         created_at=task.created_at,
         updated_at=task.updated_at
     )
@@ -275,6 +277,8 @@ async def list_tasks(limit: int = 50):
                 message=task.message,
                 panorama_path=task.panorama_path,
                 scene_name=task.scene_name,
+                asset_3d_paths=task.asset_3d_paths,
+                ply_path=task.ply_path,
                 created_at=task.created_at,
                 updated_at=task.updated_at
             )

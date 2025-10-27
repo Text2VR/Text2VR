@@ -42,6 +42,8 @@ class TaskManager:
         segmentation_results_path: Optional[str] = None,
         segmentation_visualization_path: Optional[str] = None,
         inpainted_panorama_path: Optional[str] = None,
+        asset_3d_paths: Optional[Dict[str, str]] = None,
+        ply_path: Optional[str] = None,
         error_details: Optional[str] = None
     ) -> bool:
         """Update task status"""
@@ -64,6 +66,12 @@ class TaskManager:
 
         if inpainted_panorama_path:
             task.inpainted_panorama_path = inpainted_panorama_path
+
+        if asset_3d_paths:
+            task.asset_3d_paths = asset_3d_paths
+
+        if ply_path:
+            task.ply_path = ply_path
 
         if error_details:
             task.error_details = error_details

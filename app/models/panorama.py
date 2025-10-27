@@ -4,7 +4,7 @@ Pydantic models for panorama generation
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field
 
 
@@ -43,6 +43,8 @@ class StatusResponse(BaseModel):
     segmentation_visualization_path: Optional[str] = None
     inpainted_panorama_path: Optional[str] = None
     scene_name: Optional[str] = None
+    asset_3d_paths: Optional[Dict[str, str]] = None
+    ply_path: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     progress: Optional[float] = Field(None, ge=0.0, le=1.0, description="Progress percentage")
@@ -58,6 +60,8 @@ class TaskInfo(BaseModel):
     segmentation_visualization_path: Optional[str] = None
     inpainted_panorama_path: Optional[str] = None
     scene_name: Optional[str] = None
+    asset_3d_paths: Optional[Dict[str, str]] = None
+    ply_path: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     request: PanoramaRequest

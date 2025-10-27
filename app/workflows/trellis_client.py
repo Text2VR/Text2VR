@@ -16,6 +16,8 @@ import requests
 from pathlib import Path
 from typing import Optional
 
+from .defaults import TRELLIS_DEFAULTS
+
 # Setup logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -119,14 +121,14 @@ class TrellisAPIClient:
         image_path: str,
         asset_name: str,
         output_path: str,
-        seed: int = 42,
-        texture_size: int = 1024,
-        simplify: float = 0.95,
-        ss_guidance_strength: float = 7.5,
-        ss_sampling_steps: int = 12,
-        slat_guidance_strength: float = 3.0,
-        slat_sampling_steps: int = 12,
-        timeout: int = 120
+        seed: Optional[int] = None,
+        texture_size: Optional[int] = None,
+        simplify: Optional[float] = None,
+        ss_guidance_strength: Optional[float] = None,
+        ss_sampling_steps: Optional[int] = None,
+        slat_guidance_strength: Optional[float] = None,
+        slat_sampling_steps: Optional[int] = None,
+        timeout: Optional[int] = None
     ) -> str:
         """
         Generate a 3D GLB asset from a 2D image using TRELLIS API.
@@ -231,13 +233,13 @@ class TrellisAPIClient:
 
                 data = {
                     'asset_name': asset_name,
-                    'seed': seed,
-                    'texture_size': texture_size,
-                    'simplify': simplify,
-                    'ss_guidance_strength': ss_guidance_strength,
-                    'ss_sampling_steps': ss_sampling_steps,
-                    'slat_guidance_strength': slat_guidance_strength,
-                    'slat_sampling_steps': slat_sampling_steps
+                    'seed': seed if seed is not None else TRELLIS_DEFAULTS.seed,
+                    'texture_size': texture_size if texture_size is not None else TRELLIS_DEFAULTS.texture_size,
+                    'simplify': simplify if simplify is not None else TRELLIS_DEFAULTS.simplify,
+                    'ss_guidance_strength': ss_guidance_strength if ss_guidance_strength is not None else TRELLIS_DEFAULTS.ss_guidance_strength,
+                    'ss_sampling_steps': ss_sampling_steps if ss_sampling_steps is not None else TRELLIS_DEFAULTS.ss_sampling_steps,
+                    'slat_guidance_strength': slat_guidance_strength if slat_guidance_strength is not None else TRELLIS_DEFAULTS.slat_guidance_strength,
+                    'slat_sampling_steps': slat_sampling_steps if slat_sampling_steps is not None else TRELLIS_DEFAULTS.slat_sampling_steps
                 }
 
                 logger.info(f"📤 Uploading image to {self.base_url}/generate-direct")
@@ -247,7 +249,7 @@ class TrellisAPIClient:
                     f"{self.base_url}/generate-direct",
                     files=files,
                     data=data,
-                    timeout=timeout,
+                    timeout=timeout if timeout is not None else TRELLIS_DEFAULTS.timeout,
                     stream=True
                 )
 

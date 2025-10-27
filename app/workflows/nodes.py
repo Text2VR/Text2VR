@@ -13,7 +13,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..config import settings
-from .api_client import PanoramaAPIClient
+from .pano_client import PanoramaAPIClient
+from .defaults import (
+    GAUSSIAN_DEFAULTS,
+    INPAINTING_DEFAULTS,
+    PANORAMA_DEFAULTS,
+    SEGMENTATION_DEFAULTS,
+    TRELLIS_DEFAULTS,
+)
 from .segmentation_client import SegmentationAPIClient
 from .inpainting_client import InpaintingAPIClient
 from .trellis_client import TrellisAPIClient
@@ -72,9 +79,9 @@ def panorama_generation_node(state: WorkflowState) -> WorkflowState:
         result_path = client.generate_panorama(
             text=state["rewritten_query"],
             scene_name=state["scene_name"],
-            use_self_refinement=False,
-            num_prompt=3,
-            max_rounds=3,
+            use_self_refinement=state.get("use_self_refinement", False),
+            num_prompt=state.get("num_prompt", 3),
+            max_rounds=state.get("max_rounds", 3),
         )
 
         print(f"📦 DreamScene360 API returned: {result_path}")
@@ -84,19 +91,19 @@ def panorama_generation_node(state: WorkflowState) -> WorkflowState:
             print(f"🔍 Processing path: {result_path}")
             if result_path.startswith("/workspace/data/"):
                 local_result_path = result_path.replace(
-                    "/workspace/data/", "/home/0in/workspace/Text2VR/data/"
+                    "/workspace/data/", "/home/capstoneproj0310/Text2VR/data/"
                 )
                 print(f"🔄 Converted to: {local_result_path}")
             elif result_path.startswith("/workspace/DREAMSCENE360/output/"):
                 local_result_path = result_path.replace(
                     "/workspace/DREAMSCENE360/output/",
-                    "/home/0in/workspace/Text2VR/output/",
+                    "/home/capstoneproj0310/Text2VR/output/",
                 )
                 print(f"🔄 Converted DREAMSCENE360 path to: {local_result_path}")
             else:
                 scene_name = state["scene_name"]
                 local_result_path = (
-                    f"/home/0in/workspace/Text2VR/data/{scene_name}/panorama.png"
+                    f"/home/capstoneproj0310/Text2VR/data/{scene_name}/panorama.png"
                 )
                 print(f"🔄 Using fallback path: {local_result_path}")
 
@@ -133,7 +140,7 @@ def panorama_generation_node(state: WorkflowState) -> WorkflowState:
                     print(f"🔍 Original path was: {result_path}")
 
                     scene_name = state["scene_name"]
-                    scene_dir = f"/home/0in/workspace/Text2VR/data/{scene_name}"
+                    scene_dir = f"/home/capstoneproj0310/Text2VR/data/{scene_name}"
                     print(f"🔍 Checking scene directory: {scene_dir}")
 
                     if os.path.exists(scene_dir):
@@ -156,7 +163,7 @@ def panorama_generation_node(state: WorkflowState) -> WorkflowState:
                         print(
                             "🔍 Searching for recent PNG files in data directory..."
                         )
-                        data_dir = "/home/0in/workspace/Text2VR/data"
+                        data_dir = "/home/capstoneproj0310/Text2VR/data"
                         all_pngs: List[Tuple[float, str]] = []
                         for root, _, files in os.walk(data_dir):
                             for file in files:
@@ -239,7 +246,8 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
 
         panorama_path = state["panorama_path"]
         container_path = panorama_path.replace(
-            "/home/0in/workspace/Text2VR/data/", "/app/host_data/"
+            SEGMENTATION_DEFAULTS.panorama_path_prefix,
+            SEGMENTATION_DEFAULTS.container_path_prefix,
         )
 
         print(f"🔄 Container path: {container_path}")
@@ -249,6 +257,10 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
         result = client.segment_panorama(
             panorama_path=container_path,
             scene_name=state["scene_name"],
+            sam_checkpoint=state.get("sam_checkpoint", SEGMENTATION_DEFAULTS.sam_checkpoint),
+            openai_api_key=state.get("openai_api_key", SEGMENTATION_DEFAULTS.openai_api_key),
+            box_threshold=state.get("box_threshold", SEGMENTATION_DEFAULTS.box_threshold),
+            text_threshold=state.get("text_threshold", SEGMENTATION_DEFAULTS.text_threshold),
         )
 
         print("✅ Segmentation completed")
@@ -261,7 +273,7 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
             print("🔪 Starting asset cropping with transparency...")
 
             # masking_output 디렉토리 경로 (docker-compose.yml 볼륨 마운트 참고)
-            segmentation_output_dir = f"/home/0in/workspace/Text2VR/masking_output/{state['scene_name']}"
+            segmentation_output_dir = f"/home/capstoneproj0310/Text2VR/masking_output/{state['scene_name']}"
 
             cropped_assets = crop_assets_with_transparency(
                 panorama_path=panorama_path,
@@ -290,8 +302,8 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
         try:
             if state.get("task_id"):
                 scene_name = state["scene_name"]
-                segmentation_results_path = f"/home/0in/workspace/Text2VR/masking_output/{scene_name}/results.json"
-                segmentation_visualization_path = f"/home/0in/workspace/Text2VR/masking_output/{scene_name}/visualizations/panorama_visualization.png"
+                segmentation_results_path = f"/home/capstoneproj0310/Text2VR/masking_output/{scene_name}/results.json"
+                segmentation_visualization_path = f"/home/capstoneproj0310/Text2VR/masking_output/{scene_name}/visualizations/panorama_visualization.png"
 
                 task_manager.update_task_status(
                     task_id=state["task_id"],
@@ -388,7 +400,7 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
             print(f"🎯 Generating 3D for: {asset_name}")
 
             # 출력 경로 설정
-            output_dir = f"/home/0in/workspace/Text2VR/output/3d_assets/{scene_name}"
+            output_dir = f"/home/capstoneproj0310/Text2VR/output/3d_assets/{scene_name}"
             output_path = f"{output_dir}/{asset_name}.glb"
 
             try:
@@ -396,8 +408,8 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
                 result_path = client.generate_3d_asset(
                     image_path=image_path,
                     asset_name=asset_name,
-                    output_path=output_path,
-                    timeout=120  # 2분 타임아웃
+                    output_path=output_path
+                    # timeout은 TRELLIS_DEFAULTS에서 관리됨
                 )
 
                 asset_3d_paths[asset_name] = result_path
@@ -486,10 +498,11 @@ def inpainting_node(state: WorkflowState) -> WorkflowState:
 
         # 컨테이너 경로로 변환
         container_panorama_path = panorama_path.replace(
-            "/home/0in/workspace/Text2VR/data/", "/workspace/data/"
+            INPAINTING_DEFAULTS.panorama_path_prefix,
+            INPAINTING_DEFAULTS.container_path_prefix,
         )
 
-        container_mask_dir = f"/workspace/masking_output/{scene_name}/masks"
+        container_mask_dir = f"{INPAINTING_DEFAULTS.mask_dir_prefix}{scene_name}/masks"
 
         print(f"🔄 Container panorama path: {container_panorama_path}")
         print(f"🔄 Container mask dir: {container_mask_dir}")
@@ -499,14 +512,28 @@ def inpainting_node(state: WorkflowState) -> WorkflowState:
         result_path = client.inpaint_panorama(
             panorama_path=container_panorama_path,
             mask_dir=container_mask_dir,
-            scene_name=scene_name
+            scene_name=scene_name,
+            model_id=state.get("inpaint_model_id", INPAINTING_DEFAULTS.model_id),
+            prompt=state.get("inpaint_prompt", INPAINTING_DEFAULTS.prompt),
+            neg_prompt=state.get("inpaint_neg_prompt", INPAINTING_DEFAULTS.neg_prompt),
+            strength=state.get("inpaint_strength", INPAINTING_DEFAULTS.strength),
+            guidance=state.get("inpaint_guidance", INPAINTING_DEFAULTS.guidance),
+            steps=state.get("inpaint_steps", INPAINTING_DEFAULTS.steps),
+            wrap_pad=state.get("inpaint_wrap_pad", INPAINTING_DEFAULTS.wrap_pad),
+            dilate=state.get("inpaint_dilate", INPAINTING_DEFAULTS.dilate),
+            feather=state.get("inpaint_feather", INPAINTING_DEFAULTS.feather),
+            erase=state.get("inpaint_erase", INPAINTING_DEFAULTS.erase),
+            seed=state.get("inpaint_seed", INPAINTING_DEFAULTS.seed),
+            poll_interval=state.get("inpaint_poll_interval", INPAINTING_DEFAULTS.poll_interval),
+            timeout=state.get("inpaint_timeout", INPAINTING_DEFAULTS.timeout),
         )
 
         print(f"✅ Inpainting completed: {result_path}")
 
         # 컨테이너 경로를 호스트 경로로 변환
         host_result_path = result_path.replace(
-            "/workspace/inpainted_pano/", "/home/0in/workspace/Text2VR/inpainted_pano/"
+            INPAINTING_DEFAULTS.result_prefix,
+            "/home/capstoneproj0310/Text2VR/inpainted_pano/",
         )
 
         # 인페인팅 작업 완료 후 컨테이너 중지 (VRAM 절약)
@@ -572,7 +599,8 @@ def ply_generation_node(state: WorkflowState) -> WorkflowState:
 
         # 컨테이너 경로로 변환
         container_path = panorama_path.replace(
-            "/home/0in/workspace/Text2VR/", "/workspace/"
+            GAUSSIAN_DEFAULTS.panorama_path_prefix,
+            GAUSSIAN_DEFAULTS.container_path_prefix,
         )
 
         print(f"🔄 Container path: {container_path}")
@@ -583,10 +611,13 @@ def ply_generation_node(state: WorkflowState) -> WorkflowState:
             json={
                 "panorama_path": container_path,
                 "scene_name": state.get("scene_name", "default_scene"),
-                "iterations": 100,
-                "save_iterations": [50, 100]
+                "iterations": state.get("training_iterations", GAUSSIAN_DEFAULTS.iterations),
+                "save_iterations": state.get("training_save_iterations", GAUSSIAN_DEFAULTS.save_iterations),
+                "white_background": state.get("training_white_background", GAUSSIAN_DEFAULTS.white_background),
+                "sh_degree": state.get("training_sh_degree", GAUSSIAN_DEFAULTS.sh_degree),
+                "gen_res": state.get("training_gen_res", GAUSSIAN_DEFAULTS.gen_res),
             },
-            timeout=600  # Increased timeout due to training time
+            timeout=GAUSSIAN_DEFAULTS.request_timeout  # Increased timeout due to training time
         )
 
         if response.status_code == 200:
@@ -611,7 +642,7 @@ def ply_generation_node(state: WorkflowState) -> WorkflowState:
 
             # 호스트 경로로 변환
             host_ply_path = container_ply_path.replace(
-                "/workspace/plyoutput", "/home/0in/workspace/Text2VR/plyoutput"
+                "/workspace/plyoutput", "/home/capstoneproj0310/Text2VR/plyoutput"
             )
 
             print(f"✅ Gaussian Splatting training completed: {host_ply_path}")
