@@ -71,6 +71,7 @@ ehthumbs.db
 .envnode_modules/
 web-dist/
 output/
+plyoutput/
 stitch_output/
 seged_assets/
 inpainted_pano/
