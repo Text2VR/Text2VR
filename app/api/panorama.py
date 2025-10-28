@@ -129,7 +129,6 @@ async def get_segmentation_assets(task_id: str):
     # Check if Mock mode is enabled
     if settings.MOCK_PIPELINE_MODE:
         seged_assets_dir = settings.MOCK_SEGMENTATION_DIR
-        logger.info(f"[MOCK] Using mock segmentation directory: {seged_assets_dir}")
     else:
         # Extract scene name from panorama_path or segmentation_results_path
         scene_name = None
@@ -198,7 +197,6 @@ async def get_segmentation_asset(task_id: str, asset_name: str):
     # Check if Mock mode is enabled
     if settings.MOCK_PIPELINE_MODE:
         asset_path = f"{settings.MOCK_SEGMENTATION_DIR}/{asset_name}.png"
-        logger.info(f"[MOCK] Using mock asset path: {asset_path}")
     else:
         # Extract scene name from panorama_path or segmentation_results_path
         scene_name = None

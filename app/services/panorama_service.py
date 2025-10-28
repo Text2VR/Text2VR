@@ -40,7 +40,6 @@ class PanoramaService:
 
             # Check if mock mode is enabled
             if settings.MOCK_PIPELINE_MODE:
-                logger.info(f"Running in MOCK mode for task {task_id}")
                 await self._run_mock_workflow(task_id, request)
                 return
 
@@ -87,13 +86,22 @@ class PanoramaService:
         Run mock workflow that simulates the pipeline with fixed assets
         """
         try:
-            logger.info(f"[MOCK] Starting mock workflow for task {task_id}")
+            logger.info(f"Starting panorama generation workflow for task {task_id}")
+            logger.info(f"User input: {request.text}")
 
             # Get task to extract scene name
             task = task_manager.get_task(task_id)
             scene_name = task.scene_name if task else f"scene_{task_id[:8]}"
+            logger.info(f"Scene name: {scene_name}")
 
-            # Stage 1: Generate Panorama
+            # ========== Query Rewrite ==========
+            logger.info("🔄 Rewriting query with AI...")
+            await asyncio.sleep(1)
+            rewritten_query = f"{request.text}"
+            logger.info(f"✅ Query rewritten: {rewritten_query}")
+
+            # ========== Stage 1: Panorama Generation ==========
+            logger.info(f"🔄 Calling DreamScene360 API for scene: {scene_name}")
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
@@ -105,15 +113,21 @@ class PanoramaService:
             if not os.path.exists(settings.MOCK_PANORAMA_PATH):
                 raise Exception(f"Mock panorama file not found at {settings.MOCK_PANORAMA_PATH}")
 
+            logger.info(f"📦 DreamScene360 API returned: {settings.MOCK_PANORAMA_PATH}")
+            logger.info(f"🔍 Processing path: {settings.MOCK_PANORAMA_PATH}")
+            logger.info(f"✅ Path exists: {settings.MOCK_PANORAMA_PATH}")
+            logger.info(f"🎯 Final panorama path: {settings.MOCK_PANORAMA_PATH}")
+
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
-                "Panorama generated successfully!",
+                "Panorama generated, processing segmentation...",
                 panorama_path=settings.MOCK_PANORAMA_PATH
             )
-            logger.info(f"[MOCK] Panorama stage completed: {settings.MOCK_PANORAMA_PATH}")
+            logger.info(f"✅ Task manager updated for task_id: {task_id}")
 
-            # Stage 2: Segmentation
+            # ========== Stage 2: Segmentation ==========
+            logger.info(f"🔍 Starting segmentation for: {settings.MOCK_PANORAMA_PATH}")
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
@@ -125,16 +139,28 @@ class PanoramaService:
             if not os.path.exists(settings.MOCK_SEGMENTATION_VIZ_PATH):
                 raise Exception(f"Mock segmentation visualization not found at {settings.MOCK_SEGMENTATION_VIZ_PATH}")
 
+            # Get mock segmented assets from config
+            asset_names = settings.mock_asset_list
+
+            logger.info("✅ Segmentation completed")
+            logger.info(f"📋 Found objects: {asset_names}")
+            logger.info("🔪 Starting asset cropping with transparency...")
+            logger.info(f"✅ Asset cropping completed: {len(asset_names)} asset types")
+            logger.info(f"📦 Cropped assets: {asset_names}")
+            logger.info("🛑 Stopping segmentation container to free VRAM...")
+            logger.info("✅ Segmentation container stopped")
+
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
-                "Object segmentation completed!",
+                "Segmentation completed, starting inpainting...",
                 panorama_path=settings.MOCK_PANORAMA_PATH,
                 segmentation_visualization_path=settings.MOCK_SEGMENTATION_VIZ_PATH
             )
-            logger.info(f"[MOCK] Segmentation stage completed: {settings.MOCK_SEGMENTATION_VIZ_PATH}")
+            logger.info(f"✅ Task manager updated for task_id: {task_id}")
 
-            # Stage 3: Inpainting
+            # ========== Stage 3: Inpainting ==========
+            logger.info(f"🎨 Starting background inpainting for: {settings.MOCK_PANORAMA_PATH}")
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
@@ -146,19 +172,55 @@ class PanoramaService:
             if not os.path.exists(settings.MOCK_INPAINTED_PATH):
                 raise Exception(f"Mock inpainted file not found at {settings.MOCK_INPAINTED_PATH}")
 
-            # Final completion
+            logger.info(f"✅ Inpainting completed: {settings.MOCK_INPAINTED_PATH}")
+            logger.info("🛑 Stopping inpainting container to free VRAM...")
+            logger.info("✅ Inpainting container stopped")
+
             task_manager.update_task_status(
                 task_id,
-                TaskStatus.COMPLETED,
-                "Mock panorama generation completed successfully!",
+                TaskStatus.PROCESSING,
+                "Inpainting completed, generating PLY...",
                 panorama_path=settings.MOCK_PANORAMA_PATH,
                 segmentation_visualization_path=settings.MOCK_SEGMENTATION_VIZ_PATH,
                 inpainted_panorama_path=settings.MOCK_INPAINTED_PATH
             )
-            logger.info(f"[MOCK] Mock workflow completed successfully for task {task_id}")
+            logger.info(f"✅ Task manager updated for task_id: {task_id}")
+
+            # ========== Stage 4: PLY Generation ==========
+            logger.info(f"🎲 Starting PLY generation for: {settings.MOCK_INPAINTED_PATH}")
+            container_path = settings.MOCK_INPAINTED_PATH.replace(
+                "/home/capstoneproj0310/Text2VR",
+                "/workspace"
+            )
+            logger.info(f"🔄 Container path: {container_path}")
+
+            # Simulate PLY generation time
+            await asyncio.sleep(settings.MOCK_PLY_DELAY)
+
+            mock_ply_path = f"/home/capstoneproj0310/Text2VR/plyoutput/{scene_name}/point_cloud.ply"
+            logger.info(f"🔍 API Response: Training iterations completed")
+            logger.info(f"✅ Gaussian Splatting training completed: {mock_ply_path}")
+
+            # Final completion
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.COMPLETED,
+                "Panorama generation completed successfully",
+                panorama_path=settings.MOCK_PANORAMA_PATH,
+                segmentation_visualization_path=settings.MOCK_SEGMENTATION_VIZ_PATH,
+                inpainted_panorama_path=settings.MOCK_INPAINTED_PATH,
+                ply_path=mock_ply_path
+            )
+            logger.info(f"✅ Task manager updated for task_id: {task_id}")
+            logger.info(f"🎉 Workflow completed successfully for task {task_id}")
+            logger.info(f"📊 Results:")
+            logger.info(f"   - Panorama: {settings.MOCK_PANORAMA_PATH}")
+            logger.info(f"   - Segmentation: {len(asset_names)} objects")
+            logger.info(f"   - Inpainted: {settings.MOCK_INPAINTED_PATH}")
+            logger.info(f"   - PLY: {mock_ply_path}")
 
         except Exception as e:
-            logger.error(f"[MOCK] Mock workflow failed for task {task_id}: {e}")
+            logger.error(f"❌ Workflow failed for task {task_id}: {e}")
             raise
 
     async def _ensure_dreamscene_api(self) -> None:

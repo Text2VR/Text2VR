@@ -3,7 +3,7 @@ Configuration management for Text2VR
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from pydantic_settings import BaseSettings
 
 
@@ -40,11 +40,18 @@ class Settings(BaseSettings):
     MOCK_SEGMENTATION_DIR: str = "/home/capstoneproj0310/Text2VR/demo_assets/segmented"
     MOCK_SEGMENTATION_VIZ_PATH: str = "/home/capstoneproj0310/Text2VR/demo_assets/segmentation_viz.png"
     MOCK_INPAINTED_PATH: str = "/home/capstoneproj0310/Text2VR/demo_assets/inpainted.png"
+    MOCK_SEGMENTED_ASSETS: str = "table,armchair,lamp,plant,sofa"
 
     # Mock Pipeline Timing (in seconds)
     MOCK_PANORAMA_DELAY: int = 3
     MOCK_SEGMENTATION_DELAY: int = 4
     MOCK_INPAINTING_DELAY: int = 5
+    MOCK_PLY_DELAY: int = 2
+
+    @property
+    def mock_asset_list(self) -> List[str]:
+        """Parse comma-separated asset names into a list"""
+        return [asset.strip() for asset in self.MOCK_SEGMENTED_ASSETS.split(",") if asset.strip()]
 
     # Logging
     LOG_LEVEL: str
