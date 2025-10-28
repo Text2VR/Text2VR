@@ -119,34 +119,41 @@ async def download_panorama(task_id: str):
 @router.get("/segmentation/{task_id}")
 async def get_segmentation_assets(task_id: str):
     """Get list of segmented asset images"""
+    from ..config import settings
+
     task = task_manager.get_task(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Extract scene name from panorama_path or segmentation_results_path
-    scene_name = None
-    if task.panorama_path:
-        # Extract from path like /home/.../data/scene_xxx/panorama.png
-        import re
-        match = re.search(r'scene_[a-f0-9]+', task.panorama_path)
-        if match:
-            scene_name = match.group(0)
+    # Check if Mock mode is enabled
+    if settings.MOCK_PIPELINE_MODE:
+        seged_assets_dir = settings.MOCK_SEGMENTATION_DIR
+        logger.info(f"[MOCK] Using mock segmentation directory: {seged_assets_dir}")
+    else:
+        # Extract scene name from panorama_path or segmentation_results_path
+        scene_name = None
+        if task.panorama_path:
+            # Extract from path like /home/.../data/scene_xxx/panorama.png
+            import re
+            match = re.search(r'scene_[a-f0-9]+', task.panorama_path)
+            if match:
+                scene_name = match.group(0)
 
-    if not scene_name and task.segmentation_results_path:
-        import re
-        match = re.search(r'scene_[a-f0-9]+', task.segmentation_results_path)
-        if match:
-            scene_name = match.group(0)
+        if not scene_name and task.segmentation_results_path:
+            import re
+            match = re.search(r'scene_[a-f0-9]+', task.segmentation_results_path)
+            if match:
+                scene_name = match.group(0)
 
-    if not scene_name:
-        raise HTTPException(
-            status_code=400,
-            detail="Scene name not available"
-        )
+        if not scene_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Scene name not available"
+            )
 
-    # Find segmented assets in seged_assets/{scene_name}/
-    seged_assets_dir = f"/home/0in/workspace/Text2VR/seged_assets/{scene_name}"
+        # Find segmented assets in seged_assets/{scene_name}/
+        seged_assets_dir = f"/home/0in/workspace/Text2VR/seged_assets/{scene_name}"
 
     logger.info(f"Looking for segmented assets in: {seged_assets_dir}")
     logger.info(f"Directory exists: {os.path.exists(seged_assets_dir)}")
@@ -181,30 +188,37 @@ async def get_segmentation_assets(task_id: str):
 @router.get("/segmentation/{task_id}/asset/{asset_name}")
 async def get_segmentation_asset(task_id: str, asset_name: str):
     """Download a specific segmented asset image"""
+    from ..config import settings
+
     task = task_manager.get_task(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Extract scene name from panorama_path or segmentation_results_path
-    scene_name = None
-    if task.panorama_path:
-        import re
-        match = re.search(r'scene_[a-f0-9]+', task.panorama_path)
-        if match:
-            scene_name = match.group(0)
+    # Check if Mock mode is enabled
+    if settings.MOCK_PIPELINE_MODE:
+        asset_path = f"{settings.MOCK_SEGMENTATION_DIR}/{asset_name}.png"
+        logger.info(f"[MOCK] Using mock asset path: {asset_path}")
+    else:
+        # Extract scene name from panorama_path or segmentation_results_path
+        scene_name = None
+        if task.panorama_path:
+            import re
+            match = re.search(r'scene_[a-f0-9]+', task.panorama_path)
+            if match:
+                scene_name = match.group(0)
 
-    if not scene_name and task.segmentation_results_path:
-        import re
-        match = re.search(r'scene_[a-f0-9]+', task.segmentation_results_path)
-        if match:
-            scene_name = match.group(0)
+        if not scene_name and task.segmentation_results_path:
+            import re
+            match = re.search(r'scene_[a-f0-9]+', task.segmentation_results_path)
+            if match:
+                scene_name = match.group(0)
 
-    if not scene_name:
-        raise HTTPException(status_code=400, detail="Scene name not available")
+        if not scene_name:
+            raise HTTPException(status_code=400, detail="Scene name not available")
 
-    # Construct the asset path
-    asset_path = f"/home/0in/workspace/Text2VR/seged_assets/{scene_name}/{asset_name}.png"
+        # Construct the asset path
+        asset_path = f"/home/0in/workspace/Text2VR/seged_assets/{scene_name}/{asset_name}.png"
 
     if not os.path.exists(asset_path):
         raise HTTPException(status_code=404, detail="Asset file not found")

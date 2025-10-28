@@ -33,7 +33,19 @@ class Settings(BaseSettings):
     # Task Management
     TASK_TIMEOUT: int
     STATUS_CHECK_INTERVAL: int
-    
+
+    # Mock Pipeline Mode
+    MOCK_PIPELINE_MODE: bool = False
+    MOCK_PANORAMA_PATH: str = "/home/capstoneproj0310/Text2VR/demo_assets/panorama.png"
+    MOCK_SEGMENTATION_DIR: str = "/home/capstoneproj0310/Text2VR/demo_assets/segmented"
+    MOCK_SEGMENTATION_VIZ_PATH: str = "/home/capstoneproj0310/Text2VR/demo_assets/segmentation_viz.png"
+    MOCK_INPAINTED_PATH: str = "/home/capstoneproj0310/Text2VR/demo_assets/inpainted.png"
+
+    # Mock Pipeline Timing (in seconds)
+    MOCK_PANORAMA_DELAY: int = 3
+    MOCK_SEGMENTATION_DELAY: int = 4
+    MOCK_INPAINTING_DELAY: int = 5
+
     # Logging
     LOG_LEVEL: str
     LOG_FORMAT: str

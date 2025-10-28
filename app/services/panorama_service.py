@@ -6,6 +6,7 @@ import os
 import sys
 import subprocess
 import logging
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -32,21 +33,27 @@ class PanoramaService:
         try:
             # Update task status
             task_manager.update_task_status(
-                task_id, 
-                TaskStatus.PROCESSING, 
+                task_id,
+                TaskStatus.PROCESSING,
                 "Starting panorama generation with LangGraph..."
             )
-            
+
+            # Check if mock mode is enabled
+            if settings.MOCK_PIPELINE_MODE:
+                logger.info(f"Running in MOCK mode for task {task_id}")
+                await self._run_mock_workflow(task_id, request)
+                return
+
             # Ensure DreamScene360 API is running
             await self._ensure_dreamscene_api()
-            
+
             # Import and run LangGraph workflow
             task_manager.update_task_status(
                 task_id,
                 TaskStatus.PROCESSING,
                 "Rewriting query with AI..."
             )
-            
+
             result_state = await self._run_langgraph_workflow(task_id, request)
             result_path = result_state.get("panorama_path") if result_state else None
             asset_3d_paths = result_state.get("asset_3d_paths") if result_state else None
@@ -64,7 +71,7 @@ class PanoramaService:
                 logger.info(f"Task {task_id} completed: {result_path}")
             else:
                 raise Exception("Panorama generation failed - no output file created")
-                
+
         except Exception as e:
             error_msg = f"Generation failed: {str(e)}"
             task_manager.update_task_status(
@@ -75,6 +82,85 @@ class PanoramaService:
             )
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)
     
+    async def _run_mock_workflow(self, task_id: str, request: PanoramaRequest) -> None:
+        """
+        Run mock workflow that simulates the pipeline with fixed assets
+        """
+        try:
+            logger.info(f"[MOCK] Starting mock workflow for task {task_id}")
+
+            # Get task to extract scene name
+            task = task_manager.get_task(task_id)
+            scene_name = task.scene_name if task else f"scene_{task_id[:8]}"
+
+            # Stage 1: Generate Panorama
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.PROCESSING,
+                "Generating panorama from text prompt..."
+            )
+            await asyncio.sleep(settings.MOCK_PANORAMA_DELAY)
+
+            # Check if mock panorama file exists
+            if not os.path.exists(settings.MOCK_PANORAMA_PATH):
+                raise Exception(f"Mock panorama file not found at {settings.MOCK_PANORAMA_PATH}")
+
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.PROCESSING,
+                "Panorama generated successfully!",
+                panorama_path=settings.MOCK_PANORAMA_PATH
+            )
+            logger.info(f"[MOCK] Panorama stage completed: {settings.MOCK_PANORAMA_PATH}")
+
+            # Stage 2: Segmentation
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.PROCESSING,
+                "Segmenting objects in panorama..."
+            )
+            await asyncio.sleep(settings.MOCK_SEGMENTATION_DELAY)
+
+            # Check if mock segmentation visualization exists
+            if not os.path.exists(settings.MOCK_SEGMENTATION_VIZ_PATH):
+                raise Exception(f"Mock segmentation visualization not found at {settings.MOCK_SEGMENTATION_VIZ_PATH}")
+
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.PROCESSING,
+                "Object segmentation completed!",
+                panorama_path=settings.MOCK_PANORAMA_PATH,
+                segmentation_visualization_path=settings.MOCK_SEGMENTATION_VIZ_PATH
+            )
+            logger.info(f"[MOCK] Segmentation stage completed: {settings.MOCK_SEGMENTATION_VIZ_PATH}")
+
+            # Stage 3: Inpainting
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.PROCESSING,
+                "Inpainting panorama background..."
+            )
+            await asyncio.sleep(settings.MOCK_INPAINTING_DELAY)
+
+            # Check if mock inpainted file exists
+            if not os.path.exists(settings.MOCK_INPAINTED_PATH):
+                raise Exception(f"Mock inpainted file not found at {settings.MOCK_INPAINTED_PATH}")
+
+            # Final completion
+            task_manager.update_task_status(
+                task_id,
+                TaskStatus.COMPLETED,
+                "Mock panorama generation completed successfully!",
+                panorama_path=settings.MOCK_PANORAMA_PATH,
+                segmentation_visualization_path=settings.MOCK_SEGMENTATION_VIZ_PATH,
+                inpainted_panorama_path=settings.MOCK_INPAINTED_PATH
+            )
+            logger.info(f"[MOCK] Mock workflow completed successfully for task {task_id}")
+
+        except Exception as e:
+            logger.error(f"[MOCK] Mock workflow failed for task {task_id}: {e}")
+            raise
+
     async def _ensure_dreamscene_api(self) -> None:
         """Ensure DreamScene360 API server is running"""
         import httpx
