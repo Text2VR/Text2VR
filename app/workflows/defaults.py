@@ -30,7 +30,7 @@ class InpaintingDefaults:
     result_prefix: str = "/workspace/inpainted_pano/"
 
     # Model parameters (aligned with API server)
-    #model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+    # model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
     model_id: str = "stabilityai/stable-diffusion-2-inpainting"
     prompt: str = "clean empty interior background, seamless walls and floor, photorealistic, matching lighting, no new objects"
     neg_prompt: str = "sofa, couch, armchair, chair, bench, text, watermark, logo, artifacts, distortion, blurry, people, signature"

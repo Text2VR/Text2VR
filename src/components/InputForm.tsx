@@ -138,7 +138,7 @@ export const InputForm: React.FC<InputFormProps> = ({ onSubmit, isLoading }) => 
           }}
         >
           {isLoading && <LoadingSpinner />}
-          {isLoading ? 'Generating...' : 'Generate Panorama'}
+          {isLoading ? 'Generating...' : 'Generate Scene'}
         </button>
       </form>
     </div>
