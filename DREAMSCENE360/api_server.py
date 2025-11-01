@@ -57,6 +57,8 @@ class TrainGaussianRequest(BaseModel):
     scene_name: Optional[str] = None
     iterations: int = 100
     save_iterations: List[int] = [50, 100]
+    test_iterations: int = 100
+    no_perturb_loss: bool = False
     gen_res: int = 512
     white_background: bool = False
     sh_degree: int = 3
@@ -259,12 +261,16 @@ async def train_gaussian(request: TrainGaussianRequest):
         # Add save_iterations as separate arguments
         cmd_args.extend([str(x) for x in request.save_iterations])
         cmd_args.extend([
+            "--test_iterations", str(request.test_iterations),
             "--sh_degree", str(request.sh_degree)
         ])
 
-        # Add optional white background flag
+        # Add optional flags
         if request.white_background:
             cmd_args.append("--white_background")
+
+        if request.no_perturb_loss:
+            cmd_args.append("--no_perturb_loss")
 
         # Run training with subprocess
         print(f"🚀 Executing: {' '.join(cmd_args)}")

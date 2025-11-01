@@ -377,22 +377,22 @@ Examples:
     # Optional arguments
     parser.add_argument('--base-url', default='http://localhost:8004',
                        help='TRELLIS API base URL (default: http://localhost:8004)')
-    parser.add_argument('--seed', type=int, default=42,
-                       help='Random seed for reproducibility (default: 42)')
-    parser.add_argument('--texture-size', type=int, default=1024, choices=[512, 1024, 2048],
-                       help='Texture resolution (default: 1024)')
-    parser.add_argument('--simplify', type=float, default=0.95,
-                       help='Mesh simplification ratio 0.0-1.0 (default: 0.95)')
-    parser.add_argument('--ss-guidance', type=float, default=7.5,
-                       help='Sparse structure guidance strength (default: 7.5)')
-    parser.add_argument('--ss-steps', type=int, default=12,
-                       help='Sparse structure sampling steps (default: 12)')
-    parser.add_argument('--slat-guidance', type=float, default=3.0,
-                       help='SLAT guidance strength (default: 3.0)')
-    parser.add_argument('--slat-steps', type=int, default=12,
-                       help='SLAT sampling steps (default: 12)')
-    parser.add_argument('--timeout', type=int, default=120,
-                       help='Request timeout in seconds (default: 120)')
+    parser.add_argument('--seed', type=int, default=TRELLIS_DEFAULTS.seed,
+                       help=f'Random seed for reproducibility (default: {TRELLIS_DEFAULTS.seed})')
+    parser.add_argument('--texture-size', type=int, default=TRELLIS_DEFAULTS.texture_size, choices=[512, 1024, 2048],
+                       help=f'Texture resolution (default: {TRELLIS_DEFAULTS.texture_size})')
+    parser.add_argument('--simplify', type=float, default=TRELLIS_DEFAULTS.simplify,
+                       help=f'Mesh simplification ratio 0.0-1.0 (default: {TRELLIS_DEFAULTS.simplify})')
+    parser.add_argument('--ss-guidance', type=float, default=TRELLIS_DEFAULTS.ss_guidance_strength,
+                       help=f'Sparse structure guidance strength (default: {TRELLIS_DEFAULTS.ss_guidance_strength})')
+    parser.add_argument('--ss-steps', type=int, default=TRELLIS_DEFAULTS.ss_sampling_steps,
+                       help=f'Sparse structure sampling steps (default: {TRELLIS_DEFAULTS.ss_sampling_steps})')
+    parser.add_argument('--slat-guidance', type=float, default=TRELLIS_DEFAULTS.slat_guidance_strength,
+                       help=f'SLAT guidance strength (default: {TRELLIS_DEFAULTS.slat_guidance_strength})')
+    parser.add_argument('--slat-steps', type=int, default=TRELLIS_DEFAULTS.slat_sampling_steps,
+                       help=f'SLAT sampling steps (default: {TRELLIS_DEFAULTS.slat_sampling_steps})')
+    parser.add_argument('--timeout', type=int, default=TRELLIS_DEFAULTS.timeout,
+                       help=f'Request timeout in seconds (default: {TRELLIS_DEFAULTS.timeout})')
     parser.add_argument('--health-check', action='store_true',
                        help='Only perform health check and exit')
 

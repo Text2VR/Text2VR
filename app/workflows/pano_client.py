@@ -25,18 +25,22 @@ class PanoramaAPIClient:
         """Generate panorama and return the file path"""
 
         # Start generation task
+        actual_use_self_refinement = use_self_refinement if use_self_refinement is not None else PANORAMA_DEFAULTS.use_self_refinement
+        actual_num_prompt = num_prompt if num_prompt is not None else PANORAMA_DEFAULTS.num_prompt
+        actual_max_rounds = max_rounds if max_rounds is not None else PANORAMA_DEFAULTS.max_rounds
+
         response = requests.post(f"{self.base_url}/generate", json={
             "text": text,
             "scene_name": scene_name,
-            "use_self_refinement": use_self_refinement if use_self_refinement is not None else PANORAMA_DEFAULTS.use_self_refinement,
-            "num_prompt": num_prompt if num_prompt is not None else PANORAMA_DEFAULTS.num_prompt,
-            "max_rounds": max_rounds if max_rounds is not None else PANORAMA_DEFAULTS.max_rounds
+            "use_self_refinement": actual_use_self_refinement,
+            "num_prompt": actual_num_prompt,
+            "max_rounds": actual_max_rounds
         })
         response.raise_for_status()
 
         task_data = response.json()
         task_id = task_data["task_id"]
-        print(f"✅ Task started: {task_id}, Self Refinement: {use_self_refinement}")
+        print(f"✅ Task started: {task_id}, Self Refinement: {actual_use_self_refinement}")
 
         # Poll for completion
         while True:
@@ -63,9 +67,9 @@ if __name__ == "__main__":
 
     text = sys.argv[1]
     scene_name = sys.argv[2]
-    use_self_refinement = sys.argv[3].lower() == "true" if len(sys.argv) > 3 else False
-    num_prompt = int(sys.argv[4]) if len(sys.argv) > 4 else None
-    max_rounds = int(sys.argv[5]) if len(sys.argv) > 5 else None
+    use_self_refinement = sys.argv[3].lower() == "true" if len(sys.argv) > 3 else PANORAMA_DEFAULTS.use_self_refinement
+    num_prompt = int(sys.argv[4]) if len(sys.argv) > 4 else PANORAMA_DEFAULTS.num_prompt
+    max_rounds = int(sys.argv[5]) if len(sys.argv) > 5 else PANORAMA_DEFAULTS.max_rounds
 
     client = PanoramaAPIClient()
 

@@ -79,9 +79,9 @@ def panorama_generation_node(state: WorkflowState) -> WorkflowState:
         result_path = client.generate_panorama(
             text=state["rewritten_query"],
             scene_name=state["scene_name"],
-            use_self_refinement=state.get("use_self_refinement", False),
-            num_prompt=state.get("num_prompt", 3),
-            max_rounds=state.get("max_rounds", 3),
+            use_self_refinement=state.get("use_self_refinement", PANORAMA_DEFAULTS.use_self_refinement),
+            num_prompt=state.get("num_prompt", PANORAMA_DEFAULTS.num_prompt),
+            max_rounds=state.get("max_rounds", PANORAMA_DEFAULTS.max_rounds),
         )
 
         print(f"📦 DreamScene360 API returned: {result_path}")
@@ -259,8 +259,6 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
             scene_name=state["scene_name"],
             sam_checkpoint=state.get("sam_checkpoint", SEGMENTATION_DEFAULTS.sam_checkpoint),
             openai_api_key=state.get("openai_api_key", SEGMENTATION_DEFAULTS.openai_api_key),
-            box_threshold=state.get("box_threshold", SEGMENTATION_DEFAULTS.box_threshold),
-            text_threshold=state.get("text_threshold", SEGMENTATION_DEFAULTS.text_threshold),
         )
 
         print("✅ Segmentation completed")
@@ -613,6 +611,8 @@ def ply_generation_node(state: WorkflowState) -> WorkflowState:
                 "scene_name": state.get("scene_name", "default_scene"),
                 "iterations": state.get("training_iterations", GAUSSIAN_DEFAULTS.iterations),
                 "save_iterations": state.get("training_save_iterations", GAUSSIAN_DEFAULTS.save_iterations),
+                "test_iterations": state.get("training_test_iterations", GAUSSIAN_DEFAULTS.test_iterations),
+                "no_perturb_loss": state.get("training_no_perturb_loss", GAUSSIAN_DEFAULTS.no_perturb_loss),
                 "white_background": state.get("training_white_background", GAUSSIAN_DEFAULTS.white_background),
                 "sh_degree": state.get("training_sh_degree", GAUSSIAN_DEFAULTS.sh_degree),
                 "gen_res": state.get("training_gen_res", GAUSSIAN_DEFAULTS.gen_res),

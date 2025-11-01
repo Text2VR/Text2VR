@@ -39,7 +39,7 @@ class InpaintingRequest(BaseModel):
     model_id: str = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
     prompt: str = "clean empty interior background, seamless walls and floor, photorealistic, matching lighting, no new objects"
     neg_prompt: str = "sofa, couch, armchair, chair, bench, text, watermark, logo, artifacts, distortion, blurry, people, signature"
-    strength: float = 0.94
+    strength: float = 0.95
     guidance: float = 5.0
     steps: int = 40
     wrap_pad: Optional[int] = None  # None = auto
