@@ -20,7 +20,7 @@ Text2VR orchestrates multiple AI components with **Docker Compose** so you can r
 
 - NVIDIA GPU + recent driver
 - [Docker](https://www.docker.com/) and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-
+- [Unity Gaussian Splatting Plugin](https://github.com/aras-p/UnityGaussianSplatting)
 ---
 
 ## 📁 Project layout
