@@ -27,7 +27,7 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 | **Panorama** | DreamScene360 (Stable Diffusion + Stitch Diffusion) |
 | **Segmentation** | GroundingDINO + SAM + GPT-4o |
 | **3D Generation** | TRELLIS |
-| **Inpainting** | SDXL Inpaint |
+| **Inpainting** | Stable Diffusion 2 Inpaint |
 | **3D Scene** | Gaussian Splatting |
 | **Infrastructure** | Docker Compose + NVIDIA Container Toolkit |
 
@@ -43,7 +43,7 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 |---------|------|-------------|
 | `panorama-api` | 8001 | DreamScene360 - 360° panorama generation |
 | `segmentation-api` | 8002 | GroundingDINO + SAM - Asset segmentation |
-| `inpainting-api` | 8003 | SDXL - Background inpainting |
+| `inpainting-api` | 8003 | SD2 Inpaint - Background inpainting |
 | `trellis-api` | 8004 | TRELLIS - 2D to 3D asset conversion |
 
 ### LangGraph Workflow
@@ -56,7 +56,7 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
                                                         │
 ┌─────────────────┐     ┌─────────────────┐     ┌───────▼─────────┐
 │  PLY Generation │◀────│   Inpainting    │◀────│ 3D Asset Gen    │
-│    (GS Train)   │     │     (SDXL)      │     │   (TRELLIS)     │
+│    (GS Train)   │     │     (SD2)       │     │   (TRELLIS)     │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
@@ -80,7 +80,7 @@ Generates 360° equirectangular panorama using DreamScene360 with optional self-
 Converts 2D segmented assets to 3D GLB models using TRELLIS.
 
 ### Stage 5: Background Inpainting
-Removes segmented objects and fills background seamlessly using SDXL Inpaint with wrap-aware padding.
+Removes segmented objects and fills background seamlessly using Stable Diffusion 2 Inpaint with wrap-aware padding.
 
 ### Stage 6: Gaussian Splatting
 Trains 3D Gaussian Splatting model from the inpainted panorama for immersive VR rendering.
