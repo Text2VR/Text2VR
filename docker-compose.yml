@@ -23,7 +23,6 @@ services:
               count: 1            
               capabilities: [gpu]
     volumes:
-      - ./DREAMSCENE360:/workspace/DREAMSCENE360
       - ./output:/workspace/DREAMSCENE360/output
       - ./stitch_output:/workspace/DREAMSCENE360/stitch_diffusion/output
       - ./pre_checkpoints:/workspace/DREAMSCENE360/pre_checkpoints
@@ -98,9 +97,6 @@ services:
               count: 1
               capabilities: [gpu]
     volumes:
-      - ./BG_INPAINT/inpaint_panorama.py:/workspace/inpaint_panorama.py:ro
-      - ./BG_INPAINT/api_server.py:/workspace/api_server.py:ro
-      - ./BG_INPAINT/start_api.sh:/workspace/start_api.sh:ro
       - ./data:/workspace/data
       - ./inpainted_pano:/workspace/inpainted_pano
       - ./masking_output:/workspace/masking_output
@@ -128,7 +124,6 @@ services:
               count: 1
               capabilities: [gpu]
     volumes:
-      - ./TRELLIS_API/trellis_api_v2.py:/app/trellis_api_v2.py:ro
       - ./seged_assets:/app/seged_assets:ro
       - ./output/3d_assets:/app/output/3d_assets
       - ./cache/hf:/root/.cache/huggingface
