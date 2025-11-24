@@ -89,9 +89,9 @@ Trains 3D Gaussian Splatting model from the inpainted panorama for immersive VR 
 
 ## Results Gallery
 
-| Panorama | Segmentation | Inpainted | 3D Assets |
-|----------|--------------|-----------|-----------|
-| ![Panorama](docs/results/panorama.png) | ![Segmentation](docs/results/segmentation.png) | ![Inpainted](docs/results/inpainted.png) | ![3D Assets](docs/results/3d_assets.png) |
+| | |
+|:---:|:---:|
+| ![Result 1](docs/results/result_1.png) | ![Result 2](docs/results/result_2.png) |
 
 ---
 
