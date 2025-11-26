@@ -100,7 +100,7 @@ Trains 3D Gaussian Splatting model from the inpainted panorama for immersive VR 
 
 ## Prerequisites
 
-- **NVIDIA GPU** with 12GB+ VRAM (recommended: L40S)
+- **NVIDIA GPU** with 16GB+ VRAM (recommended: NVIDIA L4 D6 24GB)
 - **Docker** and **Docker Compose**
 - **NVIDIA Container Toolkit**
 - **OpenAI API Key** (for GPT-4o)
@@ -238,19 +238,19 @@ All API parameters are centralized in `app/workflows/defaults.py`:
 ```python
 # Panorama generation
 PANORAMA_DEFAULTS.use_self_refinement = True
-PANORAMA_DEFAULTS.num_prompt = 5
-PANORAMA_DEFAULTS.max_rounds = 3
+PANORAMA_DEFAULTS.num_prompt = 2
+PANORAMA_DEFAULTS.max_rounds = 2
 
 # Segmentation
 SEGMENTATION_DEFAULTS.sam_checkpoint = "/app/checkpoints/sam_vit_h_4b8939.pth"
 
 # Inpainting
-INPAINTING_DEFAULTS.strength = 0.85
+INPAINTING_DEFAULTS.strength = 0.95
 INPAINTING_DEFAULTS.guidance = 7.5
-INPAINTING_DEFAULTS.steps = 30
+INPAINTING_DEFAULTS.steps = 40
 
 # Gaussian Splatting
-GAUSSIAN_DEFAULTS.iterations = 3000
+GAUSSIAN_DEFAULTS.iterations = 7000
 GAUSSIAN_DEFAULTS.sh_degree = 3
 ```
 
