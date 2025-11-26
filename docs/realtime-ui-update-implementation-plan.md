@@ -1,84 +1,96 @@
-# 실시간 UI 업데이트 구현 계획서
+# Real-Time UI Update Implementation Plan
+
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-**작성일**: 2025-10-21
-**목적**: LangGraph 파이프라인 중간 결과물을 실시간으로 프론트엔드 UI에 표시
+````
+
+**Date**: 2025-10-21
+**Goal**: Display intermediate outputs from the LangGraph pipeline on the frontend UI in real time.
 
 ---
 
-## 📋 요구사항 명확화
+## 📋 Requirements Clarification
 
-### 핵심 요구사항
+### Core Requirement
 
-> LangGraph 파이프라인이 도는 중간중간 생성되는 3가지 결과물을 **각각 생성되는 즉시** 실시간으로 UI에 표시
+> Three intermediate results produced during the LangGraph pipeline must be displayed on the UI **as soon as each one is generated**.
 
-#### 3가지 결과물
+#### The 3 Intermediate Outputs
 
-1. **파노라마** (`panorama.png`)
-2. **세그먼테이션 결과물** (마스크, 시각화 이미지)
-3. **인페인팅된 파노라마** (`inpainted_panorama.png`)
+1. **Panorama** (`panorama.png`)
+2. **Segmentation outputs** (masks, visualization image)
+3. **Inpainted panorama** (`inpainted_panorama.png`)
 
-#### 현재 문제
+#### Current Issues
 
-- ❌ 전체 파이프라인이 끝나야만 UI 업데이트
-- ❌ 세그먼테이션, 인페인팅 결과가 UI에 안나오거나 이상하게 표시됨
+* ❌ UI is updated only after the entire pipeline finishes.
+* ❌ Segmentation and inpainting outputs either do not appear on the UI or display incorrectly.
 
-#### 목표 상태
+#### Target State
 
-- ✅ 파노라마 생성 완료 → 즉시 UI 표시
-- ✅ 세그먼테이션 완료 → 즉시 UI 표시 (마스크/시각화)
-- ✅ 인페인팅 완료 → 즉시 UI 표시
+* ✅ When panorama generation finishes → show immediately on UI.
+* ✅ When segmentation finishes → show segmentation results immediately (masks/visualization).
+* ✅ When inpainting finishes → show inpainted panorama immediately.
 
 ---
 
-## 🔍 문제 원인 분석
+## 🔍 Root Cause Analysis
 
-### 근본 원인 3가지
+### Three Main Root Causes
 
-#### 1. LangGraph 파이프라인이 동기(Synchronous) 실행됨
+#### 1. LangGraph pipeline runs synchronously
 
-**위치**: `app/services/panorama_service.py:159`
+**Location**: `app/services/panorama_service.py:159`
 
 ```python
-result = workflow.invoke(initial_state)  # 동기 실행 - 모든 노드가 끝날때까지 blocking
+result = workflow.invoke(initial_state)  # Synchronous execution - blocking until all nodes finish
 ```
 
-- **문제**: LangGraph의 `workflow.invoke()`는 **동기 함수**로, 모든 노드(query_rewrite → panorama_generation → segmentation → inpainting → ply_generation)가 **순차적으로 완료될 때까지 블로킹**
-- **결과**: 중간 단계에서 파노라마, 세그먼테이션, 인페인팅이 생성되더라도 **전체 파이프라인이 끝나기 전까지는 함수가 리턴되지 않아** UI 업데이트가 불가능
+* **Problem**: LangGraph’s `workflow.invoke()` is a **synchronous** function. It blocks until all nodes
+  (query_rewrite → panorama_generation → segmentation → inpainting → ply_generation)
+  complete sequentially.
+* **Consequence**: Even if the panorama, segmentation, and inpainting outputs are generated in the middle,
+  the function does not return until the entire pipeline finishes, so **UI updates cannot happen earlier**.
 
-#### 2. 중간 결과물이 task_manager에 업데이트되지 않음
+#### 2. Intermediate results are not written into `task_manager`
 
-**위치**: `app/workflows/nodes.py`
+**Location**: `app/workflows/nodes.py`
 
-- **파노라마 생성 노드** (62-207행): 파노라마 생성 완료 후 `state`에만 저장, `task_manager` 업데이트 안함
-- **세그먼테이션 노드** (209-295행): 세그먼테이션 완료 후 `state`에만 저장, `task_manager` 업데이트 안함
-- **인페인팅 노드** (298-379행): 인페인팅 완료 후 `state`에만 저장, `task_manager` 업데이트 안함
+* **Panorama generation node** (lines 62–207): after generating the panorama, the result is stored only in `state`, not in `task_manager`.
+* **Segmentation node** (lines 209–295): result stored only in `state`, not in `task_manager`.
+* **Inpainting node** (lines 298–379): result stored only in `state`, not in `task_manager`.
 
-**현재 로직**:
+**Current logic**:
+
 ```python
-# panorama_generation_node 예시
+# Example from panorama_generation_node
 return {
     **state,
-    "panorama_path": final_path,  # state에만 저장
-    # task_manager.update_task_status(...) 호출 없음!
+    "panorama_path": final_path,  # stored only in state
+    # no task_manager.update_task_status(...) call!
 }
 ```
 
-**검증 결과**:
+**Verification**:
+
 ```bash
 $ grep "task_manager" Text2VR/app/workflows/nodes.py
-# 결과: No matches found
+# Result: No matches found
 ```
 
-**결과**: 프론트엔드가 `/status/{task_id}` API를 호출해도 `task_manager`에 중간 결과물 경로가 없어서 UI에 표시할 수 없음
+**Consequence**:
+Even if the frontend calls `/status/{task_id}`, `task_manager` does not know the paths to intermediate outputs, so the UI has nothing to display.
 
-#### 3. 백엔드 API에 중간 결과물 엔드포인트가 없음
+#### 3. Backend APIs do not expose intermediate outputs
 
-**현재 상태**:
-- `app/api/panorama.py` - 전체 파노라마만 반환하는 `/panorama/{task_id}` 엔드포인트만 존재
-- 세그먼테이션 결과물 엔드포인트 없음
-- 인페인팅된 파노라마 엔드포인트 없음
+**Current status**:
 
-**프론트엔드 상태 인터페이스**:
+* `app/api/panorama.py` – only exposes `/panorama/{task_id}` which returns the final panorama.
+* No endpoint for segmentation outputs.
+* No endpoint for inpainted panorama.
+
+**Frontend status interface**:
+
 ```typescript
 // src/types/api.ts:11-16
 export interface StatusResponse {
@@ -86,63 +98,65 @@ export interface StatusResponse {
   message: string;
   task_id: string;
   progress?: number;
-  // panorama_path, segmentation_data, inpainted_panorama_path 필드가 없음!
+  // No panorama_path, segmentation_data, or inpainted_panorama_path fields!
 }
 ```
 
-**데이터 모델**:
+**Data model**:
+
 ```python
 # app/models/panorama.py:48-58
 class TaskInfo(BaseModel):
     task_id: str
     status: TaskStatus
     message: str
-    panorama_path: Optional[str] = None          # ✅ 있음
+    panorama_path: Optional[str] = None          # ✅ exists
     scene_name: Optional[str] = None
-    # segmentation_data_path: 필드 없음         # ❌ 없음
-    # inpainted_panorama_path: 필드 없음        # ❌ 없음
+    # segmentation_data_path: missing             # ❌
+    # inpainted_panorama_path: missing            # ❌
 ```
 
-**결과**: 프론트엔드가 중간 결과물을 받을 수 없는 구조
+**Consequence**:
+The frontend has no way to receive intermediate outputs.
 
 ---
 
-## 🏗️ 해결 방안 아키텍처
+## 🏗️ Architectural Solution
 
-### 현재 데이터 흐름
+### Current Data Flow
 
 ```
 Frontend (polling /status)
-    ↓ (2초마다)
+    ↓ (every 2s)
     └─→ Backend: GET /status/{task_id}
             ↓
             └─→ task_manager.get_task()
                     ↓
-                    └─→ TaskInfo 반환 (panorama_path만 있고 중간 결과물 없음)
+                    └─→ TaskInfo returned (only panorama_path; no intermediate outputs)
 
 LangGraph Pipeline (blocking):
 query_rewrite → panorama_gen → segmentation → inpainting → ply_gen
                      ↓              ↓               ↓
-                  (state에만      (state에만     (state에만
-                   저장됨)        저장됨)         저장됨)
+                  (stored only   (stored only   (stored only
+                   in state)     in state)      in state)
                                                    ↓
-                                            최종 완료 후에만
-                                            task_manager 업데이트
+                                            Only after final step
+                                            task_manager is updated
 ```
 
-### 개선된 데이터 흐름
+### Improved Data Flow
 
 ```
 Frontend (polling /status)
-    ↓ (2초마다)
+    ↓ (every 2s)
     └─→ Backend: GET /status/{task_id}
             ↓
             └─→ task_manager.get_task()
                     ↓
                     └─→ StatusResponse {
-                          panorama_path: "...",           ✅
-                          segmentation_path: "...",       ✅
-                          inpainted_panorama_path: "..." ✅
+                          panorama_path: "...",             ✅
+                          segmentation_path: "...",         ✅
+                          inpainted_panorama_path: "..."    ✅
                         }
 
 LangGraph Pipeline:
@@ -150,28 +164,31 @@ query_rewrite → panorama_gen → segmentation → inpainting → ply_gen
                      ↓              ↓               ↓
                   state +        state +        state +
                   task_manager   task_manager   task_manager
-                  ✅ 실시간      ✅ 실시간      ✅ 실시간
-                     업데이트       업데이트       업데이트
+                  ✅ real-time   ✅ real-time   ✅ real-time
+                     updates        updates        updates
 ```
 
 ---
 
-## 📝 세부 Task 정의
+## 📝 Detailed Tasks
 
-### Phase 1: 백엔드 데이터 모델 확장 (필수 기반 작업)
+### Phase 1: Extend backend data models (required foundation)
 
-#### Task 1.1: Pydantic 모델 확장
+#### Task 1.1: Extend Pydantic models
 
-**파일**: `app/models/panorama.py`
+**File**: `app/models/panorama.py`
 
-**작업 내용**:
-- `TaskInfo` 모델에 필드 추가:
-  - `segmentation_results_path: Optional[str] = None` - JSON 경로
-  - `segmentation_visualization_path: Optional[str] = None` - 시각화 이미지
-  - `inpainted_panorama_path: Optional[str] = None`
-- `StatusResponse` 모델에 동일 필드 추가
+**Work**:
 
-**변경 예시**:
+* Add fields to `TaskInfo`:
+
+  * `segmentation_results_path: Optional[str] = None` – path to JSON
+  * `segmentation_visualization_path: Optional[str] = None` – path to visualization image
+  * `inpainted_panorama_path: Optional[str] = None`
+* Add the same fields to `StatusResponse`.
+
+**Example change**:
+
 ```python
 class TaskInfo(BaseModel):
     """Internal task information"""
@@ -179,9 +196,9 @@ class TaskInfo(BaseModel):
     status: TaskStatus
     message: str
     panorama_path: Optional[str] = None
-    segmentation_results_path: Optional[str] = None              # 추가
-    segmentation_visualization_path: Optional[str] = None        # 추가
-    inpainted_panorama_path: Optional[str] = None                # 추가
+    segmentation_results_path: Optional[str] = None              # new
+    segmentation_visualization_path: Optional[str] = None        # new
+    inpainted_panorama_path: Optional[str] = None                # new
     scene_name: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -194,34 +211,37 @@ class StatusResponse(BaseModel):
     status: TaskStatus
     message: str
     panorama_path: Optional[str] = None
-    segmentation_results_path: Optional[str] = None              # 추가
-    segmentation_visualization_path: Optional[str] = None        # 추가
-    inpainted_panorama_path: Optional[str] = None                # 추가
+    segmentation_results_path: Optional[str] = None              # new
+    segmentation_visualization_path: Optional[str] = None        # new
+    inpainted_panorama_path: Optional[str] = None                # new
     scene_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     progress: Optional[float] = Field(None, ge=0.0, le=1.0)
 ```
 
-**예상 소요**: 15분
-**의존성**: 없음
-**검증**: Pydantic validation 통과 확인
+**Estimated time**: 15 min
+**Dependencies**: None
+**Validation**: Pydantic validation passes.
 
 ---
 
-#### Task 1.2: TaskManager 업데이트 로직 수정
+#### Task 1.2: Update TaskManager
 
-**파일**: `app/services/task_manager.py`
+**File**: `app/services/task_manager.py`
 
-**작업 내용**:
-- `update_task_status()` 메서드에 파라미터 추가:
-  - `segmentation_results_path: Optional[str] = None`
-  - `segmentation_visualization_path: Optional[str] = None`
-  - `inpainted_panorama_path: Optional[str] = None`
-- 각 필드 업데이트 로직 구현
-- `updated_at` 타임스탬프 갱신
+**Work**:
 
-**변경 예시**:
+* Extend `update_task_status()` parameters:
+
+  * `segmentation_results_path: Optional[str] = None`
+  * `segmentation_visualization_path: Optional[str] = None`
+  * `inpainted_panorama_path: Optional[str] = None`
+* Implement logic to update each field.
+* Always update `updated_at`.
+
+**Example change**:
+
 ```python
 def update_task_status(
     self,
@@ -229,9 +249,9 @@ def update_task_status(
     status: TaskStatus,
     message: str,
     panorama_path: Optional[str] = None,
-    segmentation_results_path: Optional[str] = None,           # 추가
-    segmentation_visualization_path: Optional[str] = None,     # 추가
-    inpainted_panorama_path: Optional[str] = None,             # 추가
+    segmentation_results_path: Optional[str] = None,           # new
+    segmentation_visualization_path: Optional[str] = None,     # new
+    inpainted_panorama_path: Optional[str] = None,             # new
     error_details: Optional[str] = None
 ) -> bool:
     """Update task status"""
@@ -246,13 +266,13 @@ def update_task_status(
     if panorama_path:
         task.panorama_path = panorama_path
 
-    if segmentation_results_path:                               # 추가
+    if segmentation_results_path:                               # new
         task.segmentation_results_path = segmentation_results_path
 
-    if segmentation_visualization_path:                         # 추가
+    if segmentation_visualization_path:                         # new
         task.segmentation_visualization_path = segmentation_visualization_path
 
-    if inpainted_panorama_path:                                 # 추가
+    if inpainted_panorama_path:                                 # new
         task.inpainted_panorama_path = inpainted_panorama_path
 
     if error_details:
@@ -261,27 +281,29 @@ def update_task_status(
     return True
 ```
 
-**예상 소요**: 10분
-**의존성**: Task 1.1 완료
-**검증**: 단위 테스트 또는 수동 호출 확인
+**Estimated time**: 10 min
+**Dependencies**: Task 1.1
+**Validation**: Unit test or manual call.
 
 ---
 
-### Phase 2: LangGraph 노드에서 실시간 업데이트 (핵심)
+### Phase 2: Real-time updates from LangGraph nodes (core)
 
-#### Task 2.1: WorkflowState에 task_id 추가
+#### Task 2.1: Add `task_id` to `WorkflowState`
 
-**파일**: `app/workflows/states.py`
+**File**: `app/workflows/states.py`
 
-**작업 내용**:
-- `WorkflowState` TypedDict에 `task_id: str` 필드 추가
+**Work**:
 
-**변경 예시**:
+* Add `task_id: str` to `WorkflowState` TypedDict.
+
+**Example change**:
+
 ```python
 class WorkflowState(TypedDict):
     """Represents the shared state that flows through the LangGraph workflow."""
 
-    task_id: str                                    # 추가
+    task_id: str                                    # new
     user_input: str
     rewritten_query: str
     scene_name: str
@@ -292,15 +314,17 @@ class WorkflowState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
 ```
 
-**파일**: `app/services/panorama_service.py`
+**File**: `app/services/panorama_service.py`
 
-**작업 내용**:
-- 초기 state 생성 시 `task_id` 전달
+**Work**:
 
-**변경 예시**:
+* Include `task_id` when building the initial state.
+
+**Example change**:
+
 ```python
 initial_state = {
-    "task_id": task_id,                            # 추가
+    "task_id": task_id,                            # new
     "user_input": request.text,
     "rewritten_query": "",
     "scene_name": scene_name,
@@ -310,21 +334,23 @@ initial_state = {
 }
 ```
 
-**예상 소요**: 10분
-**의존성**: 없음
-**검증**: 타입 체크 통과
+**Estimated time**: 10 min
+**Dependencies**: None
+**Validation**: Type checks.
 
 ---
 
-#### Task 2.2: panorama_generation_node 수정
+#### Task 2.2: Update `panorama_generation_node`
 
-**파일**: `app/workflows/nodes.py:62-207`
+**File**: `app/workflows/nodes.py:62-207`
 
-**작업 내용**:
-- `task_manager` import 추가
-- 파노라마 생성 완료 시점(line 187 근처)에 업데이트 로직 추가
+**Work**:
 
-**변경 예시**:
+* Import `task_manager`.
+* After panorama is generated (around line 187), update `task_manager`.
+
+**Example**:
+
 ```python
 from ..services.task_manager import task_manager
 from ..models.panorama import TaskStatus
@@ -332,12 +358,12 @@ from ..models.panorama import TaskStatus
 def panorama_generation_node(state: WorkflowState) -> WorkflowState:
     """Generate a panorama using the DreamScene360 API and post-process the file path."""
 
-    # ... 기존 코드 ...
+    # ... existing code ...
 
     final_path = local_result_path or ""
     print(f"🎯 Final panorama path: {final_path}")
 
-    # 실시간 업데이트 추가
+    # Real-time update
     if final_path:
         task_manager.update_task_status(
             task_id=state["task_id"],
@@ -358,30 +384,32 @@ def panorama_generation_node(state: WorkflowState) -> WorkflowState:
     }
 ```
 
-**예상 소요**: 20분
-**의존성**: Task 1.2, Task 2.1 완료
-**검증**: 파노라마 생성 후 `/status/{task_id}` 호출해서 `panorama_path` 확인
+**Estimated time**: 20 min
+**Dependencies**: Tasks 1.2, 2.1
+**Validation**: After panorama generation, call `/status/{task_id}` and check `panorama_path`.
 
 ---
 
-#### Task 2.3: segmentation_node 수정
+#### Task 2.3: Update `segmentation_node`
 
-**파일**: `app/workflows/nodes.py:209-295`
+**File**: `app/workflows/nodes.py:209-295`
 
-**작업 내용**:
-- 세그먼테이션 완료 시점(line 257 근처)에 업데이트 로직 추가
+**Work**:
 
-**변경 예시**:
+* After segmentation completes (around line 257), update `task_manager`.
+
+**Example**:
+
 ```python
 def segmentation_node(state: WorkflowState) -> WorkflowState:
     """Run segmentation on the generated panorama image."""
 
-    # ... 기존 코드 ...
+    # ... existing code ...
 
     print("✅ Segmentation completed")
     print(f"📋 Found objects: {list(result['segmentation_data'].get('prompts', {}).keys())}")
 
-    # 실시간 업데이트 추가
+    # Real-time update
     scene_name = state['scene_name']
     results_path = f"/home/0in/workspace/Text2VR/masking_output/{scene_name}/results.json"
     viz_path = f"/home/0in/workspace/Text2VR/masking_output/{scene_name}/visualizations/panorama_visualization.png"
@@ -393,40 +421,42 @@ def segmentation_node(state: WorkflowState) -> WorkflowState:
         segmentation_results_path=results_path,
         segmentation_visualization_path=viz_path
     )
-    print(f"✅ Updated task_manager with segmentation results")
+    print("✅ Updated task_manager with segmentation results")
 
     # Asset cropping with transparency
-    # ... 기존 코드 ...
+    # ... existing code ...
 ```
 
-**예상 소요**: 15분
-**의존성**: Task 1.2, Task 2.1 완료
-**검증**: 세그먼테이션 완료 후 `/status/{task_id}` 호출
+**Estimated time**: 15 min
+**Dependencies**: Tasks 1.2, 2.1
+**Validation**: After segmentation, call `/status/{task_id}`.
 
 ---
 
-#### Task 2.4: inpainting_node 수정
+#### Task 2.4: Update `inpainting_node`
 
-**파일**: `app/workflows/nodes.py:298-379`
+**File**: `app/workflows/nodes.py:298-379`
 
-**작업 내용**:
-- 인페인팅 완료 시점(line 363 근처)에 업데이트 로직 추가
+**Work**:
 
-**변경 예시**:
+* After inpainting completes (around line 363), update `task_manager`.
+
+**Example**:
+
 ```python
 def inpainting_node(state: WorkflowState) -> WorkflowState:
     """Run background inpainting on the panorama"""
 
-    # ... 기존 코드 ...
+    # ... existing code ...
 
     print(f"✅ Inpainting completed: {result_path}")
 
-    # 컨테이너 경로를 호스트 경로로 변환
+    # Convert container path to host path
     host_result_path = result_path.replace(
         "/workspace/inpainted_pano/", "/home/0in/workspace/Text2VR/inpainted_pano/"
     )
 
-    # 실시간 업데이트 추가
+    # Real-time update
     task_manager.update_task_status(
         task_id=state["task_id"],
         status=TaskStatus.PROCESSING,
@@ -435,27 +465,29 @@ def inpainting_node(state: WorkflowState) -> WorkflowState:
     )
     print(f"✅ Updated task_manager with inpainted panorama: {host_result_path}")
 
-    # 인페인팅 작업 완료 후 컨테이너 중지 (VRAM 절약)
-    # ... 기존 코드 ...
+    # Stop container after inpainting (VRAM savings)
+    # ... existing code ...
 ```
 
-**예상 소요**: 15분
-**의존성**: Task 1.2, Task 2.1 완료
-**검증**: 인페인팅 완료 후 `/status/{task_id}` 호출
+**Estimated time**: 15 min
+**Dependencies**: Tasks 1.2, 2.1
+**Validation**: After inpainting, call `/status/{task_id}`.
 
 ---
 
-### Phase 3: 백엔드 API 엔드포인트 추가
+### Phase 3: Backend API endpoints for intermediate outputs
 
-#### Task 3.1: 세그먼테이션 결과 제공 API
+#### Task 3.1: Segmentation result APIs
 
-**파일**: `app/api/panorama.py`
+**File**: `app/api/panorama.py`
 
-**작업 내용**:
-- 세그먼테이션 시각화 이미지 제공 엔드포인트 추가
-- 세그먼테이션 JSON 메타데이터 제공 엔드포인트 추가
+**Work**:
 
-**변경 예시**:
+* Add endpoint to return segmentation visualization image.
+* Add endpoint to return segmentation JSON metadata.
+
+**Example**:
+
 ```python
 @router.get("/segmentation/{task_id}")
 async def get_segmentation_visualization(task_id: str):
@@ -505,9 +537,10 @@ async def get_segmentation_json(task_id: str):
     )
 ```
 
-**예상 소요**: 20분
-**의존성**: Task 1.1, 1.2 완료
-**검증**: curl 또는 브라우저로 직접 테스트
+**Estimated time**: 20 min
+**Dependencies**: Tasks 1.1, 1.2
+**Validation**:
+
 ```bash
 curl http://localhost:8000/segmentation/{task_id}
 curl http://localhost:8000/segmentation/{task_id}/json
@@ -515,14 +548,16 @@ curl http://localhost:8000/segmentation/{task_id}/json
 
 ---
 
-#### Task 3.2: 인페인팅 결과 제공 API
+#### Task 3.2: Inpainted panorama API
 
-**파일**: `app/api/panorama.py`
+**File**: `app/api/panorama.py`
 
-**작업 내용**:
-- 인페인팅된 파노라마 이미지 제공 엔드포인트 추가
+**Work**:
 
-**변경 예시**:
+* Add endpoint to serve the inpainted panorama.
+
+**Example**:
+
 ```python
 @router.get("/inpainted/{task_id}")
 async def get_inpainted_panorama(task_id: str):
@@ -548,59 +583,63 @@ async def get_inpainted_panorama(task_id: str):
     )
 ```
 
-**예상 소요**: 15분
-**의존성**: Task 1.1, 1.2 완료
-**검증**: curl 테스트
+**Estimated time**: 15 min
+**Dependencies**: Tasks 1.1, 1.2
+**Validation**:
+
 ```bash
 curl http://localhost:8000/inpainted/{task_id} --output inpainted.png
 ```
 
 ---
 
-### Phase 4: 프론트엔드 타입 및 API 서비스 확장
+### Phase 4: Frontend types & API service
 
-#### Task 4.1: TypeScript 인터페이스 확장
+#### Task 4.1: Extend TypeScript interfaces
 
-**파일**: `src/types/api.ts`
+**File**: `src/types/api.ts`
 
-**작업 내용**:
-- `StatusResponse` 인터페이스에 중간 결과물 필드 추가
+**Work**:
 
-**변경 예시**:
+* Add fields for intermediate outputs to `StatusResponse`.
+
+**Example**:
+
 ```typescript
 export interface StatusResponse {
   status: 'queued' | 'processing' | 'completed' | 'failed';
   message: string;
   task_id: string;
   progress?: number;
-  panorama_path?: string;                         // 추가
-  segmentation_results_path?: string;             // 추가
-  segmentation_visualization_path?: string;       // 추가
-  inpainted_panorama_path?: string;               // 추가
-  scene_name?: string;                            // 추가
+  panorama_path?: string;                         // new
+  segmentation_results_path?: string;             // new
+  segmentation_visualization_path?: string;       // new
+  inpainted_panorama_path?: string;               // new
+  scene_name?: string;                            // new
 }
 ```
 
-**예상 소요**: 5분
-**의존성**: 없음
-**검증**: TypeScript 컴파일 통과 (`npm run build`)
+**Estimated time**: 5 min
+**Dependencies**: None
+**Validation**: `npm run build`.
 
 ---
 
-#### Task 4.2: API 서비스 메서드 추가
+#### Task 4.2: Extend API service
 
-**파일**: `src/services/apiService.ts`
+**File**: `src/services/apiService.ts`
 
-**작업 내용**:
-- 세그먼테이션 URL 생성 메서드 추가
-- 인페인팅 URL 생성 메서드 추가
+**Work**:
 
-**변경 예시**:
+* Add helpers to build URLs for segmentation and inpainted panoramas.
+
+**Example**:
+
 ```typescript
 class ApiService {
   private baseUrl = '';
 
-  // ... 기존 메서드 ...
+  // ... existing methods ...
 
   getSegmentationUrl(taskId: string): string {
     return `/segmentation/${taskId}?t=${Date.now()}`;
@@ -616,24 +655,26 @@ class ApiService {
 }
 ```
 
-**예상 소요**: 5분
-**의존성**: Task 4.1 완료
-**검증**: 타입 체크 통과
+**Estimated time**: 5 min
+**Dependencies**: Task 4.1
+**Validation**: Type checks.
 
 ---
 
-### Phase 5: 프론트엔드 UI 실시간 표시
+### Phase 5: Frontend UI for real-time display
 
-#### Task 5.1: 결과물 표시 컴포넌트 생성
+#### Task 5.1: Progressive results component
 
-**파일**: `src/components/ProgressiveResults.tsx` (신규)
+**File**: `src/components/ProgressiveResults.tsx` (new)
 
-**작업 내용**:
-- 3가지 결과물을 단계별로 표시하는 컴포넌트 생성
-- 각 섹션은 해당 경로가 있을 때만 렌더링
-- 로딩 상태 표시
+**Work**:
 
-**구현 예시**:
+* Create a component that displays the three outputs step by step.
+* Each section should render only when its path is available.
+* Show loading states when not yet available.
+
+**Example**:
+
 ```typescript
 import React from 'react';
 
@@ -717,22 +758,24 @@ export const ProgressiveResults: React.FC<ProgressiveResultsProps> = ({
 };
 ```
 
-**예상 소요**: 30분
-**의존성**: Task 4.1, 4.2 완료
-**검증**: UI에서 시각적 확인
+**Estimated time**: 30 min
+**Dependencies**: Tasks 4.1, 4.2
+**Validation**: Visual check in UI.
 
 ---
 
-#### Task 5.2: App.tsx 폴링 로직 수정
+#### Task 5.2: Update polling logic in `App.tsx`
 
-**파일**: `src/App.tsx`
+**File**: `src/App.tsx`
 
-**작업 내용**:
-- 상태 변수 추가 (각 결과물 경로)
-- `startStatusChecking` 함수 수정하여 중간 결과물도 저장
-- ProgressiveResults 컴포넌트 통합
+**Work**:
 
-**변경 예시**:
+* Add state variables for each intermediate path.
+* Modify `startStatusChecking` to store intermediate paths.
+* Integrate `ProgressiveResults` component.
+
+**Example**:
+
 ```typescript
 export const App: React.FC = () => {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
@@ -740,7 +783,7 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showPanorama, setShowPanorama] = useState(false);
 
-  // 중간 결과물 상태 추가
+  // Intermediate result states
   const [panoramaPath, setPanoramaPath] = useState<string | null>(null);
   const [segmentationPath, setSegmentationPath] = useState<string | null>(null);
   const [inpaintedPath, setInpaintedPath] = useState<string | null>(null);
@@ -757,7 +800,7 @@ export const App: React.FC = () => {
         const statusResponse = await apiService.getStatus(taskId);
         setStatus(statusResponse);
 
-        // 중간 결과물 업데이트
+        // Update intermediate paths
         if (statusResponse.panorama_path) {
           setPanoramaPath(statusResponse.panorama_path);
         }
@@ -778,7 +821,7 @@ export const App: React.FC = () => {
         }
       } catch (error) {
         console.error('Status check error:', error);
-        // ... 에러 핸들링 ...
+        // ... error handling ...
       }
     }, 2000);
   };
@@ -788,12 +831,12 @@ export const App: React.FC = () => {
     setShowPanorama(false);
     setStatus(null);
 
-    // 중간 결과물 초기화
+    // Reset intermediate states
     setPanoramaPath(null);
     setSegmentationPath(null);
     setInpaintedPath(null);
 
-    // ... 기존 코드 ...
+    // ... existing code ...
   };
 
   return (
@@ -811,12 +854,11 @@ export const App: React.FC = () => {
           visible={!!status}
         />
 
-        {/* 기존 VRPanoramaViewer 대신 ProgressiveResults 사용 */}
         <ProgressiveResults
           taskId={currentTaskId}
-          panoramaPath={panoramaPath}
-          segmentationPath={segmentationPath}
-          inpaintedPath={inpaintedPath}
+          panoramaPath={panoramaPath || undefined}
+          segmentationPath={segmentationPath || undefined}
+          inpaintedPath={inpaintedPath || undefined}
           status={status?.status || 'queued'}
         />
       </div>
@@ -825,53 +867,59 @@ export const App: React.FC = () => {
 };
 ```
 
-**예상 소요**: 20분
-**의존성**: Task 5.1 완료
-**검증**: 전체 파이프라인 실행해서 단계별 표시 확인
+**Estimated time**: 20 min
+**Dependencies**: Task 5.1
+**Validation**: Run full pipeline and verify step-by-step display.
 
 ---
 
-### Phase 6: 통합 테스트 및 검증
+### Phase 6: Integration testing and validation
 
-#### Task 6.1: E2E 테스트
+#### Task 6.1: End-to-end test
 
-**작업 내용**:
-- 전체 파이프라인 실행
-- 각 단계마다 UI 업데이트 확인
-- 타이밍 검증 (각 결과물이 생성 직후 표시되는지)
+**Work**:
 
-**테스트 시나리오**:
-1. 프론트엔드에서 텍스트 입력 및 제출
-2. 파노라마 생성 완료 → UI에 즉시 표시되는지 확인
-3. 세그먼테이션 완료 → UI에 즉시 표시되는지 확인
-4. 인페인팅 완료 → UI에 즉시 표시되는지 확인
-5. 전체 파이프라인 완료 → 최종 상태 확인
+* Run the entire pipeline.
+* Check UI updates at each stage.
+* Verify timing (each output appears shortly after it is generated).
 
-**검증 포인트**:
-- `/status/{task_id}` API 응답에 각 경로가 포함되는지
-- 프론트엔드 상태가 2초마다 업데이트되는지
-- 각 이미지가 올바르게 렌더링되는지
+**Test scenario**:
 
-**예상 소요**: 30분
-**의존성**: 모든 Phase 1-5 완료
+1. Submit a text prompt from the frontend.
+2. After panorama generation → confirm it appears on UI.
+3. After segmentation → confirm segmentation visualization appears.
+4. After inpainting → confirm inpainted panorama appears.
+5. At the end → check final status.
+
+**Validation points**:
+
+* `/status/{task_id}` includes all paths.
+* Frontend updates every 2 seconds.
+* Images render correctly.
+
+**Estimated time**: 30 min
+**Dependencies**: Phases 1–5.
 
 ---
 
-#### Task 6.2: 에러 핸들링 보완
+#### Task 6.2: Error handling improvements
 
-**작업 내용**:
-- 중간 단계 실패 시 처리
-- 파일 없을 때 fallback
-- 타임아웃 처리
+**Work**:
 
-**구현 항목**:
-1. 백엔드 API에서 파일 존재 확인 강화
-2. 프론트엔드에서 이미지 로드 실패 처리
-3. 폴링 타임아웃 설정 (예: 10분)
+* Handle failures in intermediate steps.
+* Handle missing files gracefully.
+* Add timeout handling.
 
-**변경 예시**:
+**Checklist**:
+
+1. Strengthen file-existence checks in backend APIs.
+2. Handle image load errors in the frontend.
+3. Add a polling timeout (e.g., 10 minutes).
+
+**Example**:
+
 ```typescript
-// 프론트엔드 이미지 로드 에러 핸들링
+// Frontend image load error handling
 <img
   src={`/segmentation/${taskId}`}
   alt="Segmentation"
@@ -882,123 +930,139 @@ export const App: React.FC = () => {
 />
 ```
 
-**예상 소요**: 20분
-**의존성**: Task 6.1 완료
+**Estimated time**: 20 min
+**Dependencies**: Task 6.1.
 
 ---
 
-## 📊 구현 계획 요약
+## 📊 Implementation Plan Summary
 
-| Phase | Task 수 | 예상 소요 | 우선순위 | 파일 수 |
-|-------|---------|----------|---------|---------|
-| Phase 1: 데이터 모델 | 2 | 25분 | P0 (필수) | 2 |
-| Phase 2: LangGraph 업데이트 | 4 | 60분 | P0 (필수) | 3 |
-| Phase 3: 백엔드 API | 2 | 35분 | P0 (필수) | 1 |
-| Phase 4: 프론트 타입/API | 2 | 10분 | P0 (필수) | 2 |
-| Phase 5: 프론트 UI | 2 | 50분 | P0 (필수) | 2 |
-| Phase 6: 테스트 | 2 | 50분 | P1 (권장) | - |
-| **총계** | **14 tasks** | **~230분 (3.8시간)** | | **10 파일** |
+| Phase                       | # Tasks      | Est. Time                 | Priority         | # Files      |
+| --------------------------- | ------------ | ------------------------- | ---------------- | ------------ |
+| Phase 1: Data models        | 2            | 25 min                    | P0 (required)    | 2            |
+| Phase 2: LangGraph updates  | 4            | 60 min                    | P0 (required)    | 3            |
+| Phase 3: Backend APIs       | 2            | 35 min                    | P0 (required)    | 1            |
+| Phase 4: Frontend types/API | 2            | 10 min                    | P0 (required)    | 2            |
+| Phase 5: Frontend UI        | 2            | 50 min                    | P0 (required)    | 2            |
+| Phase 6: Testing            | 2            | 50 min                    | P1 (recommended) | -            |
+| **Total**                   | **14 tasks** | **~230 min (~3.8 hours)** |                  | **10 files** |
 
-### 수정 파일 목록
+### Files to be modified
 
-**백엔드** (5 파일):
-1. `app/models/panorama.py` - 데이터 모델
-2. `app/services/task_manager.py` - Task 관리
-3. `app/workflows/states.py` - LangGraph state
-4. `app/workflows/nodes.py` - LangGraph 노드
-5. `app/api/panorama.py` - API 엔드포인트
+**Backend** (5 files):
 
-**프론트엔드** (4 파일):
-1. `src/types/api.ts` - TypeScript 타입
-2. `src/services/apiService.ts` - API 서비스
-3. `src/components/ProgressiveResults.tsx` - 신규 컴포넌트
-4. `src/App.tsx` - 메인 앱
+1. `app/models/panorama.py` – data models
+2. `app/services/task_manager.py` – task management
+3. `app/workflows/states.py` – LangGraph state
+4. `app/workflows/nodes.py` – LangGraph nodes
+5. `app/api/panorama.py` – API endpoints
 
----
+**Frontend** (4 files):
 
-## 🚀 구현 전략
-
-### 권장 접근법: Bottom-up (데이터 모델 → 백엔드 → 프론트)
-
-1. **Phase 1 → Phase 2 → Phase 3** (백엔드 완성)
-2. **Phase 4 → Phase 5** (프론트엔드 완성)
-3. **Phase 6** (검증)
-
-### 대안: Incremental (한 결과물씩 E2E)
-
-1. 파노라마만 E2E 구현
-2. 세그먼테이션 추가
-3. 인페인팅 추가
+1. `src/types/api.ts` – TypeScript types
+2. `src/services/apiService.ts` – API service
+3. `src/components/ProgressiveResults.tsx` – new component
+4. `src/App.tsx` – main app
 
 ---
 
-## 🚨 잠재적 리스크 및 고려사항
+## 🚀 Implementation Strategy
 
-### 1. LangGraph State 전달
+### Recommended approach: Bottom-up (models → backend → frontend)
 
-**리스크**: `task_id`를 state에 넣는 것이 LangGraph 아키텍처와 맞는지 검토 필요
+1. Implement **Phase 1 → Phase 2 → Phase 3** (backend complete).
+2. Implement **Phase 4 → Phase 5** (frontend complete).
+3. Run **Phase 6** (validation).
 
-**완화 방안**:
-- LangGraph `WorkflowState`는 TypedDict이므로 필드 추가는 안전
-- State는 각 노드 간 전달되므로 `task_id` 접근 가능
+### Alternative: Incremental (E2E per output)
 
-### 2. 동시성 이슈
-
-**리스크**: task_manager 딕셔너리 업데이트 시 thread-safety
-
-**현재 상황**:
-- FastAPI background tasks는 단일 워커 가정
-- 현재 구현은 딕셔너리 직접 수정
-
-**완화 방안**:
-- 프로덕션 환경에서는 Redis 등 외부 스토어 사용 고려
-- 또는 threading.Lock 사용
-
-### 3. 파일 경로 불일치
-
-**리스크**: Docker 컨테이너 경로 vs 호스트 경로 변환 로직 오류
-
-**완화 방안**:
-- 경로 변환 로직 철저히 테스트
-- 로깅 강화하여 실제 경로 추적
-
-### 4. 파일 생성 타이밍
-
-**리스크**: 파일이 생성되기 전에 API 요청이 올 수 있음
-
-**완화 방안**:
-- 백엔드 API에서 파일 존재 확인
-- 404 에러 대신 "Not yet available" 메시지 반환
-- 프론트엔드에서 graceful fallback
+1. Implement E2E just for panorama first.
+2. Add segmentation.
+3. Add inpainting.
 
 ---
 
-## ✅ 성공 기준
+## 🚨 Risks and Considerations
 
-1. **기능적 요구사항**:
-   - ✅ 파노라마 생성 즉시 UI 표시
-   - ✅ 세그먼테이션 완료 즉시 UI 표시
-   - ✅ 인페인팅 완료 즉시 UI 표시
+### 1. LangGraph state design
 
-2. **성능 요구사항**:
-   - ✅ 각 결과물 생성 후 2초 이내 UI 업데이트
-   - ✅ 폴링 오버헤드 최소화
+**Risk**: Adding `task_id` to state may conflict with LangGraph design.
 
-3. **안정성 요구사항**:
-   - ✅ 중간 단계 실패 시 에러 핸들링
-   - ✅ 파일 누락 시 적절한 메시지 표시
+**Mitigation**:
+
+* `WorkflowState` is a TypedDict, so adding fields is safe.
+* State is passed between all nodes, so each node can access `task_id`.
 
 ---
 
-## 📝 다음 단계
+### 2. Concurrency issues
 
-1. ✅ 이 문서 검토 및 승인
-2. Phase 1부터 순차적 구현 시작
-3. 각 Phase 완료 후 중간 검증
-4. Phase 6 완료 후 최종 테스트
-5. 프로덕션 배포
+**Risk**: `task_manager` uses an in-memory dict; updates may not be thread-safe.
+
+**Current situation**:
+
+* FastAPI background tasks assume a single worker in this setup.
+* Current implementation modifies the dict directly.
+
+**Mitigation**:
+
+* For production, consider Redis or another external store.
+* Or use a `threading.Lock` around updates.
 
 ---
 
-**문서 버전**: 1.0
-**최종 수정**: 2025-10-21
+### 3. Path mismatches
+
+**Risk**: Errors when converting container paths to host paths.
+
+**Mitigation**:
+
+* Thoroughly test path conversion logic.
+* Add logging for actual paths used.
+
+---
+
+### 4. File creation timing
+
+**Risk**: API may be called before the file is physically written.
+
+**Mitigation**:
+
+* Backend API checks file existence.
+* Return “Not yet available” instead of 404 when appropriate.
+* Frontend handles this with graceful fallback.
+
+---
+
+## ✅ Success Criteria
+
+1. **Functional**:
+
+   * ✅ Panorama appears on UI immediately after generation.
+   * ✅ Segmentation appears on UI immediately after completion.
+   * ✅ Inpainted panorama appears on UI immediately after completion.
+
+2. **Performance**:
+
+   * ✅ Each output is reflected on the UI within 2 seconds of being generated.
+   * ✅ Polling overhead is minimized.
+
+3. **Stability**:
+
+   * ✅ Errors in intermediate steps are handled cleanly.
+   * ✅ Missing files result in clear messages, not crashes.
+
+---
+
+## 📝 Next Steps
+
+1. ✅ Review and approve this document.
+2. Start implementation from **Phase 1** in order.
+3. Run intermediate validation after each phase.
+4. Complete **Phase 6** and finalize E2E tests.
+5. Deploy to production.
+
+---
+
+**Document Version**: 1.0
+**Last Updated**: 2025-10-21
