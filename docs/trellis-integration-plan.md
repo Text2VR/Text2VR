@@ -1,74 +1,83 @@
-# TRELLIS 3D Asset Generation 통합 계획
+# TRELLIS 3D Asset Generation Integration Plan
 
-**작성일**: 2025-10-22
-**상태**: 검증 완료 ✅
-**목적**: LangGraph 워크플로우에 TRELLIS API를 통합하여 세그멘테이션된 오브젝트를 3D GLB 에셋으로 자동 변환
-
----
-
-## 📋 목차
-
-1. [개요](#개요)
-2. [현재 워크플로우 분석](#현재-워크플로우-분석)
-3. [TRELLIS 통합 목표](#trellis-통합-목표)
-4. [검증 완료 사항](#검증-완료-사항)
-5. [구현 계획](#구현-계획)
-6. [디렉토리 구조](#디렉토리-구조)
-7. [VRAM 관리 전략](#vram-관리-전략)
-8. [구현 체크리스트](#구현-체크리스트)
-9. [예상 이슈 및 해결방안](#예상-이슈-및-해결방안)
+**Date**: 2025-10-22  
+**Status**: Verified ✅  
+**Goal**: Integrate the TRELLIS API into the LangGraph workflow to automatically convert segmented objects into 3D GLB assets.
 
 ---
 
-## 개요
+## 📋 Table of Contents
 
-### 목적
-세그멘테이션된 2D 오브젝트 이미지를 TRELLIS API를 통해 3D GLB 에셋으로 자동 변환하여, VR 씬 구성에 필요한 3D 에셋을 자동 생성합니다.
-
-### 기대 효과
-- **자동화**: 수동 3D 모델링 없이 2D 이미지에서 3D 에셋 생성
-- **일관성**: 파노라마에서 추출한 오브젝트를 동일한 스타일의 3D 에셋으로 변환
-- **효율성**: 워크플로우 내에서 원스톱으로 2D→3D 변환 처리
+1. [Overview](#overview)  
+2. [Current Workflow Analysis](#current-workflow-analysis)  
+3. [TRELLIS Integration Goals](#trellis-integration-goals)  
+4. [Verified Items](#verified-items)  
+5. [Implementation Plan](#implementation-plan)  
+6. [Directory Structure](#directory-structure)  
+7. [VRAM Management Strategy](#vram-management-strategy)  
+8. [Implementation Checklist](#implementation-checklist)  
+9. [Expected Issues and Mitigations](#expected-issues-and-mitigations)
 
 ---
 
-## 현재 워크플로우 분석
+## Overview
 
-### 기존 LangGraph 워크플로우
+### Purpose
 
-```
+Automatically convert segmented 2D object images into 3D GLB assets via the TRELLIS API, so that VR scenes can be constructed from automatically generated 3D assets.
+
+### Expected Benefits
+
+- **Automation**: Generate 3D assets from 2D images without manual 3D modeling.  
+- **Consistency**: Convert objects extracted from panoramas into stylistically consistent 3D assets.  
+- **Efficiency**: Handle the 2D→3D conversion as a one-stop process within the workflow.
+
+---
+
+## Current Workflow Analysis
+
+### Existing LangGraph Workflow
+
+```text
 query_rewrite → panorama_generation → segmentation → inpainting → ply_generation → END
-```
+````
 
-#### 각 노드의 역할
+#### Role of Each Node
 
 1. **query_rewrite** (`app/workflows/nodes.py:25-61`)
-   - 사용자 입력을 파노라마 생성에 적합하게 재작성
-   - OpenAI LLM 사용
-   - Scene name 생성 (UUID 기반)
+
+   * Rewrites user input into a form suitable for panorama generation.
+   * Uses an OpenAI LLM.
+   * Generates a scene name (UUID-based).
 
 2. **panorama_generation** (`app/workflows/nodes.py:64-221`)
-   - DreamScene360 API 호출
-   - 360도 파노라마 이미지 생성
-   - 경로: `/home/0in/workspace/Text2VR/data/{scene_name}/panorama.png`
+
+   * Calls the DreamScene360 API.
+   * Generates a 360° panorama image.
+   * Path: `/home/0in/workspace/Text2VR/data/{scene_name}/panorama.png`
 
 3. **segmentation** (`app/workflows/nodes.py:224-328`)
-   - SAM + GroundingDINO로 오브젝트 세그멘테이션
-   - 마스크 생성: `/home/0in/workspace/Text2VR/masking_output/{scene_name}/masks/`
-   - **크롭된 에셋 생성**: `/home/0in/workspace/Text2VR/seged_assets/{scene_name}/`
-   - 투명 배경(RGBA) PNG 파일로 저장
-   - 완료 후 컨테이너 중지 (VRAM 절약)
+
+   * Runs object segmentation using SAM + GroundingDINO.
+   * Generates masks:
+     `/home/0in/workspace/Text2VR/masking_output/{scene_name}/masks/`
+   * **Generates cropped assets**:
+     `/home/0in/workspace/Text2VR/seged_assets/{scene_name}/`
+   * Saves transparent-background RGBA PNG files.
+   * Stops container after completion (to save VRAM).
 
 4. **inpainting** (`app/workflows/nodes.py:331-425`)
-   - Stable Diffusion으로 배경 인페인팅
-   - 오브젝트 제거된 파노라마 생성
-   - 완료 후 컨테이너 중지 (VRAM 절약)
+
+   * Performs background inpainting using Stable Diffusion.
+   * Produces a panorama with objects removed.
+   * Stops container after completion (to save VRAM).
 
 5. **ply_generation** (`app/workflows/nodes.py:428-500`)
-   - 인페인팅된 파노라마를 PLY 포인트 클라우드로 변환
-   - Depth estimation 기반
 
-### 현재 State 구조 (`app/workflows/states.py`)
+   * Converts the inpainted panorama to a PLY point cloud.
+   * Based on depth estimation.
+
+### Current State Structure (`app/workflows/states.py`)
 
 ```python
 class WorkflowState(TypedDict):
@@ -83,82 +92,93 @@ class WorkflowState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
 ```
 
-### 크롭된 에셋 생성 로직 (`app/workflows/asset_cropper.py:102-198`)
+### Cropped Asset Generation Logic (`app/workflows/asset_cropper.py:102-198`)
 
-✅ **검증 완료**: `crop_assets_with_transparency()` 함수가 이미 구현되어 있음
+✅ **Verified**: `crop_assets_with_transparency()` is already implemented.
 
-**특징**:
-- 투명 배경(RGBA) PNG 생성
-- Bounding box 기반 크롭
-- 출력 경로: `/home/0in/workspace/Text2VR/seged_assets/{scene_name}/{asset_name}.png`
-- 반환값: `Dict[str, List[str]]` (asset_name → 파일 경로 리스트)
+**Characteristics**:
 
-**검증된 동작**:
+* Produces transparent-background (RGBA) PNGs.
+* Crops based on bounding boxes.
+* Output path:
+  `/home/0in/workspace/Text2VR/seged_assets/{scene_name}/{asset_name}.png`
+* Return value: `Dict[str, List[str]]` (asset_name → list of file paths).
+
+**Verified Behavior**:
+
 ```python
-# nodes.py:265-269에서 호출
+# Called at nodes.py:265-269
 cropped_assets = crop_assets_with_transparency(
     panorama_path=panorama_path,
     segmentation_output_dir=segmentation_output_dir,
     scene_name=state['scene_name']
 )
-# 결과: {"sofa": ["/path/to/sofa.png"], "plant": ["/path/to/plant.png"], ...}
+# Result: {"sofa": ["/path/to/sofa.png"], "plant": ["/path/to/plant.png"], ...}
 ```
 
 ---
 
-## TRELLIS 통합 목표
+## TRELLIS Integration Goals
 
-### 새로운 워크플로우
+### Updated Workflow
 
-```
+```text
 query_rewrite → panorama_generation → segmentation → asset_3d_generation → inpainting → ply_generation → END
-                                                              ↑ 새로 추가
+                                                              ↑ newly added
 ```
 
-### asset_3d_generation 노드의 역할
+### Role of the `asset_3d_generation` Node
 
-1. `cropped_assets`에서 세그멘테이션된 에셋 이미지 가져오기
-2. 각 에셋 이미지를 TRELLIS API에 전송
-3. GLB 파일 다운로드 및 저장
-4. State에 `asset_3d_paths` 업데이트
-5. TRELLIS 컨테이너 중지 (VRAM 해제)
+1. Read segmented asset images from `cropped_assets`.
+2. Send each asset image to the TRELLIS API.
+3. Download and store the resulting GLB files.
+4. Update `asset_3d_paths` in the state.
+5. Stop the TRELLIS container (free VRAM).
 
-### 기대 입출력
+### Expected I/O
 
-**입력**:
-- `state['cropped_assets']`: `{"sofa": ["/path/to/sofa.png"], ...}`
-- `state['scene_name']`: `"scene_abc123de"`
+**Input**:
 
-**출력**:
-- `state['asset_3d_paths']`: `{"sofa": "/path/to/3d_assets/scene_abc123de/sofa.glb", ...}`
+* `state['cropped_assets']`:
+  `{"sofa": ["/path/to/sofa.png"], ...}`
+* `state['scene_name']`:
+  `"scene_abc123de"`
+
+**Output**:
+
+* `state['asset_3d_paths']`:
+  `{"sofa": "/path/to/3d_assets/scene_abc123de/sofa.glb", ...}`
 
 ---
 
-## 검증 완료 사항
+## Verified Items
 
-### ✅ 1. Docker 이미지 존재 확인
+### ✅ 1. Docker Image Availability
 
 ```bash
 $ docker images | grep trellis
 trellis    v1    5745868dd8d4    6 weeks ago    43.2GB
 ```
 
-**결과**: TRELLIS 이미지가 로컬에 존재함 (trellis:v1)
+**Result**: TRELLIS image is available locally (`trellis:v1`).
 
-### ✅ 2. TRELLIS API 검증
+### ✅ 2. TRELLIS API Verification
 
-**사용할 API**: `trellis_api_v2.py`
+**API to use**: `trellis_api_v2.py`
 
-**엔드포인트**: `POST /generate-direct`
-- 파일 업로드 방식 (multipart/form-data)
-- 직접 GLB 파일 다운로드
-- 볼륨 마운트 불필요
+**Endpoint**: `POST /generate-direct`
 
-**코드 위치**: `/home/0in/workspace/Text2VR/TRELLIS_API/trellis_api_v2.py:98-213`
+* Uses multipart/form-data file upload.
+* Directly returns a GLB file.
+* No volume mount required for the response itself.
 
-**파라미터**:
+**Code location**:
+`/home/0in/workspace/Text2VR/TRELLIS_API/trellis_api_v2.py:98-213`
+
+**Parameters**:
+
 ```python
-image: UploadFile           # 입력 이미지 (RGBA PNG)
+image: UploadFile           # Input image (RGBA PNG)
 asset_name: str = "generated_asset"
 seed: int = 42
 simplify: float = 0.95
@@ -169,72 +189,74 @@ slat_guidance_strength: float = 3.0
 slat_sampling_steps: int = 12
 ```
 
-### ✅ 3. 디렉토리 구조 확인
+### ✅ 3. Directory Structure Verification
 
-**기존 디렉토리**:
-```
+**Existing directories**:
+
+```text
 /home/0in/workspace/Text2VR/
-├── data/                    # 파노라마 저장
+├── data/                    # panoramas
 │   └── {scene_name}/
 │       └── panorama.png
-├── masking_output/          # 세그멘테이션 결과
+├── masking_output/          # segmentation results
 │   └── {scene_name}/
-│       ├── masks/           # 마스크 PNG
+│       ├── masks/           # mask PNGs
 │       └── results.json
-├── seged_assets/            # ✅ 이미 존재 - 크롭된 에셋
+├── seged_assets/            # ✅ cropped assets
 │   └── {scene_name}/
 │       ├── sofa.png
 │       ├── plant.png
 │       └── ...
-└── output/                  # 기타 출력
+└── output/                  # other outputs
     └── {scene_name}/
 ```
 
-**추가 필요 디렉토리**:
-```
+**New directory needed**:
+
+```text
 /home/0in/workspace/Text2VR/
 └── output/
-    └── 3d_assets/           # 새로 생성 필요
+    └── 3d_assets/           # new
         └── {scene_name}/
             ├── sofa.glb
             ├── plant.glb
             └── ...
 ```
 
-### ✅ 4. 경로 매핑 검증
+### ✅ 4. Path Mapping Verification
 
-**호스트 ↔ 컨테이너 경로 매핑**:
+**Host ↔ Container path mapping**:
 
-| 항목 | 호스트 경로 | 컨테이너 경로 |
-|------|------------|--------------|
-| 크롭된 에셋 | `/home/0in/workspace/Text2VR/seged_assets/{scene}` | `/app/seged_assets/{scene}` |
-| 3D 에셋 저장 | `/home/0in/workspace/Text2VR/output/3d_assets/{scene}` | `/app/output/3d_assets/{scene}` |
-| 캐시 | `/home/0in/workspace/Text2VR/cache/hf` | `/root/.cache/huggingface` |
+| Item           | Host Path                                              | Container Path                  |
+| -------------- | ------------------------------------------------------ | ------------------------------- |
+| Cropped assets | `/home/0in/workspace/Text2VR/seged_assets/{scene}`     | `/app/seged_assets/{scene}`     |
+| 3D assets      | `/home/0in/workspace/Text2VR/output/3d_assets/{scene}` | `/app/output/3d_assets/{scene}` |
+| Cache          | `/home/0in/workspace/Text2VR/cache/hf`                 | `/root/.cache/huggingface`      |
 
-### ✅ 5. VRAM 사용량 확인
+### ✅ 5. VRAM Usage Check
 
-| 서비스 | VRAM (idle) | VRAM (processing) | 비고 |
-|--------|-------------|-------------------|------|
-| DreamScene360 | - | ~8-10GB | 파노라마 생성 |
-| Segmentation | - | ~6GB | SAM + GroundingDINO |
-| Inpainting | - | ~6GB | Stable Diffusion |
-| **TRELLIS** | **5.3GB** | **6-8GB** | Image-to-3D |
+| Service       | VRAM (idle) | VRAM (processing) | Notes               |
+| ------------- | ----------- | ----------------- | ------------------- |
+| DreamScene360 | -           | ~8–10 GB          | Panorama generation |
+| Segmentation  | -           | ~6 GB             | SAM + GroundingDINO |
+| Inpainting    | -           | ~6 GB             | Stable Diffusion    |
+| **TRELLIS**   | **5.3 GB**  | **6–8 GB**        | Image-to-3D         |
 
-**결론**: 동시 실행 시 VRAM 부족 → 각 단계 완료 후 컨테이너 중지 필요
+**Conclusion**: Running multiple services concurrently can cause VRAM shortage → containers must be stopped after each stage.
 
 ---
 
-## 구현 계획
+## Implementation Plan
 
-### Task 1: docker-compose.yml에 TRELLIS 서비스 추가
+### Task 1: Add TRELLIS service to `docker-compose.yml`
 
-**파일**: `docker-compose.yml`
+**File**: `docker-compose.yml`
 
-**추가할 서비스**:
+**Service to add**:
 
 ```yaml
 services:
-  # ... 기존 서비스들 ...
+  # ... existing services ...
 
   # TRELLIS 3D Asset Generation API
   trellis-api:
@@ -256,23 +278,23 @@ services:
               capabilities: [gpu]
     volumes:
       - ./TRELLIS_API/trellis_api_v2.py:/app/trellis_api_v2.py:ro
-      - ./seged_assets:/app/seged_assets:ro  # 크롭된 에셋 읽기
-      - ./output/3d_assets:/app/output/3d_assets  # GLB 저장
+      - ./seged_assets:/app/seged_assets:ro             # read cropped assets
+      - ./output/3d_assets:/app/output/3d_assets        # save GLBs
       - ./cache/hf:/root/.cache/huggingface
       - ./cache/torch:/root/.cache/torch
     command: ["python", "/app/trellis_api_v2.py"]
     restart: unless-stopped
 ```
 
-**포트 할당**: 8004 (다른 서비스와 충돌 방지)
+**Port**: 8004 (to avoid conflicts with other services).
 
 ---
 
-### Task 2: WorkflowState에 필드 추가
+### Task 2: Extend `WorkflowState` fields
 
-**파일**: `app/workflows/states.py`
+**File**: `app/workflows/states.py`
 
-**수정**:
+**Changes**:
 
 ```python
 class WorkflowState(TypedDict):
@@ -287,24 +309,24 @@ class WorkflowState(TypedDict):
     inpainted_panorama_path: str
     ply_path: str
 
-    # 추가: 크롭된 에셋 경로
+    # New: cropped asset paths
     cropped_assets: Dict[str, List[str]]  # {"sofa": ["/path/to/sofa.png"], ...}
 
-    # 추가: 3D 에셋 경로
-    asset_3d_paths: Dict[str, str]  # {"sofa": "/path/to/sofa.glb", ...}
+    # New: 3D asset paths
+    asset_3d_paths: Dict[str, str]        # {"sofa": "/path/to/sofa.glb", ...}
 
     messages: Annotated[List[BaseMessage], operator.add]
 ```
 
-**참고**: `cropped_assets`는 `nodes.py:309`에서 이미 사용 중이므로 타입 정의만 추가
+**Note**: `cropped_assets` is already used in `nodes.py:309`; we are just formalizing the type.
 
 ---
 
-### Task 3: TRELLIS API Client 작성
+### Task 3: Implement TRELLIS API client
 
-**파일**: `app/workflows/trellis_client.py` (새로 생성)
+**File**: `app/workflows/trellis_client.py` (new)
 
-**구현**:
+**Implementation**:
 
 ```python
 #!/usr/bin/env python3
@@ -367,7 +389,6 @@ class TrellisAPIClient:
         if not Path(image_path).exists():
             raise FileNotFoundError(f"Input image not found: {image_path}")
 
-        # Prepare multipart form data
         with open(image_path, 'rb') as f:
             files = {'image': (Path(image_path).name, f, 'image/png')}
 
@@ -382,7 +403,6 @@ class TrellisAPIClient:
                 'slat_sampling_steps': slat_sampling_steps
             }
 
-            # Call TRELLIS API
             response = requests.post(
                 f"{self.base_url}/generate-direct",
                 files=files,
@@ -392,7 +412,6 @@ class TrellisAPIClient:
             )
             response.raise_for_status()
 
-        # Save GLB file
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -417,12 +436,10 @@ if __name__ == "__main__":
     client = TrellisAPIClient()
 
     try:
-        # Health check
         health = client.health_check()
         print(f"✅ TRELLIS API Status: {health['status']}")
         print(f"📊 GPU Memory: {health['gpu_memory_used']:.2f}GB")
 
-        # Generate 3D asset
         print(f"🎯 Generating 3D asset for: {asset_name}")
         result_path = client.generate_3d_asset(
             image_path=image_path,
@@ -438,11 +455,11 @@ if __name__ == "__main__":
 
 ---
 
-### Task 4: asset_3d_generation_node 구현
+### Task 4: Implement `asset_3d_generation_node`
 
-**파일**: `app/workflows/nodes.py`
+**File**: `app/workflows/nodes.py`
 
-**추가할 노드**:
+**New node**:
 
 ```python
 def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
@@ -468,7 +485,7 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
     try:
         print(f"🎲 Starting 3D asset generation for {len(cropped_assets)} assets")
 
-        # TRELLIS 컨테이너 시작 (이미 실행 중이면 무시됨)
+        # Start TRELLIS container (ignored if already running)
         try:
             subprocess.run(
                 ["docker", "start", "text2vr_trellis_api"],
@@ -476,7 +493,7 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
                 timeout=10
             )
             print("🚀 TRELLIS container started")
-            # 파이프라인 로딩 대기 (약 10초)
+            # Wait for pipeline loading (~10 seconds)
             time.sleep(10)
         except Exception as e:
             print(f"⚠️ Failed to start TRELLIS container: {e}")
@@ -495,27 +512,22 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
         asset_3d_paths = {}
         scene_name = state["scene_name"]
 
-        # 각 에셋에 대해 3D 생성
         for asset_name, image_paths in cropped_assets.items():
             if not image_paths:
                 continue
 
-            # 첫 번째 이미지 사용 (보통 하나만 있음)
             image_path = image_paths[0]
-
             print(f"🎯 Generating 3D for: {asset_name}")
 
-            # 출력 경로 설정
             output_dir = f"/home/0in/workspace/Text2VR/output/3d_assets/{scene_name}"
             output_path = f"{output_dir}/{asset_name}.glb"
 
             try:
-                # TRELLIS API 호출
                 result_path = client.generate_3d_asset(
                     image_path=image_path,
                     asset_name=asset_name,
                     output_path=output_path,
-                    timeout=120  # 2분 타임아웃
+                    timeout=120
                 )
 
                 asset_3d_paths[asset_name] = result_path
@@ -523,10 +535,9 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
 
             except Exception as asset_exc:
                 print(f"❌ Failed to generate 3D for {asset_name}: {asset_exc}")
-                # 계속 진행 (일부 실패해도 나머지 처리)
                 continue
 
-        # TRELLIS 컨테이너 중지 (VRAM 해제)
+        # Stop TRELLIS container (free VRAM)
         try:
             print("🛑 Stopping TRELLIS container to free VRAM...")
             subprocess.run(
@@ -538,7 +549,7 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
         except Exception as e:
             print(f"⚠️ Failed to stop TRELLIS container: {e}")
 
-        # Task manager 업데이트
+        # Update task manager
         try:
             if state.get("task_id") and asset_3d_paths:
                 task_manager.update_task_status(
@@ -575,18 +586,18 @@ def asset_3d_generation_node(state: WorkflowState) -> WorkflowState:
 
 ---
 
-### Task 5: Workflow에 노드 추가
+### Task 5: Add node to workflow
 
-**파일**: `app/workflows/workflow.py`
+**File**: `app/workflows/workflow.py`
 
-**수정**:
+**Changes**:
 
 ```python
 from .nodes import (
     panorama_generation_node,
     query_rewrite_node,
     segmentation_node,
-    asset_3d_generation_node,  # 추가
+    asset_3d_generation_node,  # new
     inpainting_node,
     ply_generation_node,
 )
@@ -598,29 +609,29 @@ def create_workflow():
     workflow.add_node("query_rewrite", query_rewrite_node)
     workflow.add_node("panorama_generation", panorama_generation_node)
     workflow.add_node("segmentation", segmentation_node)
-    workflow.add_node("asset_3d_generation", asset_3d_generation_node)  # 추가
+    workflow.add_node("asset_3d_generation", asset_3d_generation_node)  # new
     workflow.add_node("inpainting", inpainting_node)
     workflow.add_node("ply_generation", ply_generation_node)
 
     workflow.set_entry_point("query_rewrite")
     workflow.add_edge("query_rewrite", "panorama_generation")
     workflow.add_edge("panorama_generation", "segmentation")
-    workflow.add_edge("segmentation", "asset_3d_generation")  # 추가
-    workflow.add_edge("asset_3d_generation", "inpainting")    # 수정
+    workflow.add_edge("segmentation", "asset_3d_generation")  # new
+    workflow.add_edge("asset_3d_generation", "inpainting")    # changed
     workflow.add_edge("inpainting", "ply_generation")
     workflow.add_edge("ply_generation", END)
 
     return workflow.compile()
 ```
 
-**langgraph_workflow.py 수정**:
+**`langgraph_workflow.py` changes**:
 
 ```python
 from .nodes import (
     panorama_generation_node,
     query_rewrite_node,
     segmentation_node,
-    asset_3d_generation_node,  # 추가
+    asset_3d_generation_node,  # new
 )
 
 __all__ = [
@@ -629,38 +640,38 @@ __all__ = [
     "query_rewrite_node",
     "panorama_generation_node",
     "segmentation_node",
-    "asset_3d_generation_node",  # 추가
+    "asset_3d_generation_node",  # new
 ]
 ```
 
 ---
 
-### Task 6: config.py에 TRELLIS API URL 추가
+### Task 6: Add TRELLIS API URL to `config.py`
 
-**파일**: `app/config.py`
+**File**: `app/config.py`
 
-**수정**:
+**Changes**:
 
 ```python
 class Settings(BaseSettings):
     """Application settings"""
 
-    # ... 기존 필드 ...
+    # ... existing fields ...
 
     # External APIs
     DREAMSCENE_API_URL: str
     SEGMENTATION_API_URL: str = "http://localhost:8002"
     INPAINTING_API_URL: str = "http://localhost:8003"
-    TRELLIS_API_URL: str = "http://localhost:8004"  # 추가
+    TRELLIS_API_URL: str = "http://localhost:8004"  # new
 
-    # ... 나머지 ...
+    # ... rest ...
 ```
 
 ---
 
-### Task 7: 디렉토리 생성
+### Task 7: Create directories
 
-**실행**:
+**Command**:
 
 ```bash
 mkdir -p /home/0in/workspace/Text2VR/output/3d_assets
@@ -668,27 +679,27 @@ mkdir -p /home/0in/workspace/Text2VR/output/3d_assets
 
 ---
 
-## 디렉토리 구조
+## Directory Structure
 
-### 최종 디렉토리 구조
+### Final Directory Layout
 
-```
+```text
 /home/0in/workspace/Text2VR/
 ├── app/
 │   └── workflows/
-│       ├── states.py                    # State 정의 (수정)
-│       ├── nodes.py                     # 노드 구현 (추가: asset_3d_generation_node)
-│       ├── workflow.py                  # 워크플로우 조립 (수정)
-│       ├── langgraph_workflow.py        # 호환성 레이어 (수정)
-│       ├── trellis_client.py           # TRELLIS API 클라이언트 (새로 생성)
-│       ├── segmentation_client.py      # 기존
-│       ├── inpainting_client.py        # 기존
-│       └── asset_cropper.py            # 기존
-├── config.py                            # 설정 (수정)
-├── docker-compose.yml                   # Docker 서비스 정의 (수정)
+│       ├── states.py                    # state definitions (modified)
+│       ├── nodes.py                     # node implementations (added: asset_3d_generation_node)
+│       ├── workflow.py                  # workflow assembly (modified)
+│       ├── langgraph_workflow.py        # compatibility layer (modified)
+│       ├── trellis_client.py            # TRELLIS API client (new)
+│       ├── segmentation_client.py       # existing
+│       ├── inpainting_client.py         # existing
+│       └── asset_cropper.py             # existing
+├── config.py                            # settings (modified)
+├── docker-compose.yml                   # Docker services (modified)
 ├── TRELLIS_API/
 │   ├── trellis_api.py
-│   └── trellis_api_v2.py               # 사용할 API
+│   └── trellis_api_v2.py               # API to use
 ├── data/
 │   └── {scene_name}/
 │       └── panorama.png
@@ -698,125 +709,134 @@ mkdir -p /home/0in/workspace/Text2VR/output/3d_assets
 │       │   ├── sofa.png
 │       │   └── plant.png
 │       └── results.json
-├── seged_assets/                        # ✅ 크롭된 에셋 (투명 배경)
+├── seged_assets/                        # ✅ cropped assets (transparent)
 │   └── {scene_name}/
 │       ├── sofa.png
 │       └── plant.png
 ├── output/
-│   └── 3d_assets/                       # ✨ 새로 생성: 3D GLB 에셋
+│   └── 3d_assets/                       # ✨ new: 3D GLB assets
 │       └── {scene_name}/
 │           ├── sofa.glb
 │           └── plant.glb
 └── docs/
-    └── trellis-integration-plan.md      # 이 문서
+    └── trellis-integration-plan.md      # this document
 ```
 
 ---
 
-## VRAM 관리 전략
+## VRAM Management Strategy
 
-### VRAM 사용량 분석
+### VRAM Usage Analysis
 
-| 단계 | 서비스 | VRAM (processing) | 컨테이너 상태 |
-|------|--------|-------------------|--------------|
-| 1. Query Rewrite | - | 0GB | - |
-| 2. Panorama Generation | DreamScene360 | 8-10GB | 실행 중 |
-| 3. Segmentation | ASSET_SEG | 6GB | 실행 중 → 완료 후 중지 ✅ |
-| **4. 3D Generation** | **TRELLIS** | **6-8GB** | **시작 → 완료 후 중지** ✅ |
-| 5. Inpainting | BG_INPAINT | 6GB | 시작 → 완료 후 중지 ✅ |
-| 6. PLY Generation | DreamScene360 | - | 재사용 |
+| Stage                  | Service       | VRAM (processing) | Container State               |
+| ---------------------- | ------------- | ----------------- | ----------------------------- |
+| 1. Query Rewrite       | -             | 0 GB              | -                             |
+| 2. Panorama Generation | DreamScene360 | 8–10 GB           | running                       |
+| 3. Segmentation        | ASSET_SEG     | 6 GB              | running → stop after done ✅   |
+| **4. 3D Generation**   | **TRELLIS**   | **6–8 GB**        | **start → stop after done** ✅ |
+| 5. Inpainting          | BG_INPAINT    | 6 GB              | start → stop after done ✅     |
+| 6. PLY Generation      | DreamScene360 | -                 | reused                        |
 
-### 컨테이너 중지 패턴 (이미 구현됨)
+### Container Stop Pattern (already implemented)
 
-**Segmentation 완료 후** (`nodes.py:279-286`):
+**After segmentation** (`nodes.py:279-286`):
+
 ```python
 subprocess.run(["docker", "stop", "text2vr_segmentation_api"],
                capture_output=True, timeout=10)
 ```
 
-**Inpainting 완료 후** (`nodes.py:386-393`):
+**After inpainting** (`nodes.py:386-393`):
+
 ```python
 subprocess.run(["docker", "stop", "text2vr_inpainting_api"],
                capture_output=True, timeout=10)
 ```
 
-**TRELLIS 완료 후** (새로 구현):
+**After TRELLIS** (new):
+
 ```python
 subprocess.run(["docker", "stop", "text2vr_trellis_api"],
                capture_output=True, timeout=10)
 ```
 
-### 권장 GPU 사양
+### Recommended GPU Specs
 
-- **최소**: 12GB VRAM (RTX 3080 Ti, RTX 4070 Ti)
-- **권장**: 16GB+ VRAM (RTX 4080, A4000, A5000)
-- **이상적**: 24GB+ VRAM (RTX 4090, A6000)
-
----
-
-## 구현 체크리스트
-
-### Phase 1: 환경 준비
-
-- [x] TRELLIS Docker 이미지 확인 (`trellis:v1` 존재)
-- [ ] 3D assets 디렉토리 생성 (`mkdir -p output/3d_assets`)
-- [ ] docker-compose.yml에 TRELLIS 서비스 추가
-- [ ] Docker Compose로 TRELLIS 컨테이너 시작 테스트
-
-### Phase 2: 코드 구현
-
-- [ ] `app/config.py`: TRELLIS_API_URL 추가
-- [ ] `app/workflows/states.py`: WorkflowState에 필드 추가
-  - [ ] `cropped_assets: Dict[str, List[str]]` 타입 정의
-  - [ ] `asset_3d_paths: Dict[str, str]` 추가
-- [ ] `app/workflows/trellis_client.py`: API 클라이언트 작성
-  - [ ] `health_check()` 메서드
-  - [ ] `generate_3d_asset()` 메서드
-- [ ] `app/workflows/nodes.py`: asset_3d_generation_node 추가
-  - [ ] 컨테이너 시작 로직
-  - [ ] Health check
-  - [ ] 각 에셋 반복 처리
-  - [ ] GLB 파일 저장
-  - [ ] 컨테이너 중지
-- [ ] `app/workflows/workflow.py`: 워크플로우에 노드 추가
-  - [ ] `add_node("asset_3d_generation", ...)`
-  - [ ] 엣지 수정 (`segmentation` → `asset_3d_generation` → `inpainting`)
-- [ ] `app/workflows/langgraph_workflow.py`: export 업데이트
-
-### Phase 3: 테스트
-
-- [ ] TRELLIS API 단독 테스트 (curl 또는 Python 스크립트)
-- [ ] TrellisAPIClient 단위 테스트
-- [ ] asset_3d_generation_node 단독 실행
-- [ ] 전체 워크플로우 통합 테스트
-- [ ] VRAM 사용량 모니터링 (`nvidia-smi`)
-- [ ] 에러 케이스 테스트
-  - [ ] 이미지 파일 없음
-  - [ ] API 연결 실패
-  - [ ] 일부 에셋 생성 실패
-
-### Phase 4: 문서화 및 배포
-
-- [x] 통합 계획 문서 작성 (이 문서)
-- [ ] README 업데이트
-- [ ] API 사용 예제 추가
-- [ ] 트러블슈팅 가이드 작성
+* **Minimum**: 12 GB VRAM (RTX 3080 Ti, RTX 4070 Ti)
+* **Recommended**: 16+ GB VRAM (RTX 4080, A4000, A5000)
+* **Ideal**: 24+ GB VRAM (RTX 4090, A6000)
 
 ---
 
-## 예상 이슈 및 해결방안
+## Implementation Checklist
 
-### 이슈 1: TRELLIS 컨테이너 시작 지연
+### Phase 1: Environment Preparation
 
-**문제**: 파이프라인 로딩에 시간이 걸림 (약 10초)
+* [x] Confirm TRELLIS Docker image (`trellis:v1`) exists.
+* [ ] Create 3D assets directory (`mkdir -p output/3d_assets`).
+* [ ] Add TRELLIS service to `docker-compose.yml`.
+* [ ] Test starting TRELLIS container via Docker Compose.
 
-**해결방안**:
+### Phase 2: Code Implementation
+
+* [ ] `app/config.py`: add `TRELLIS_API_URL`.
+* [ ] `app/workflows/states.py`: extend `WorkflowState`.
+
+  * [ ] Add `cropped_assets: Dict[str, List[str]]`.
+  * [ ] Add `asset_3d_paths: Dict[str, str]`.
+* [ ] `app/workflows/trellis_client.py`: implement API client.
+
+  * [ ] `health_check()` method.
+  * [ ] `generate_3d_asset()` method.
+* [ ] `app/workflows/nodes.py`: add `asset_3d_generation_node`.
+
+  * [ ] Container start logic.
+  * [ ] Health check.
+  * [ ] Loop over assets.
+  * [ ] Save GLB files.
+  * [ ] Stop container.
+* [ ] `app/workflows/workflow.py`: add node to workflow.
+
+  * [ ] `add_node("asset_3d_generation", ...)`.
+  * [ ] Update edges (`segmentation` → `asset_3d_generation` → `inpainting`).
+* [ ] `app/workflows/langgraph_workflow.py`: update exports.
+
+### Phase 3: Testing
+
+* [ ] Standalone TRELLIS API test (via curl or Python script).
+* [ ] Unit tests for `TrellisAPIClient`.
+* [ ] Isolated test for `asset_3d_generation_node`.
+* [ ] Full workflow integration test.
+* [ ] Monitor VRAM usage (`nvidia-smi`).
+* [ ] Error case tests:
+
+  * [ ] Missing image file.
+  * [ ] API connection failure.
+  * [ ] Partial asset generation failures.
+
+### Phase 4: Documentation and Deployment
+
+* [x] Draft integration plan (this document).
+* [ ] Update README.
+* [ ] Add API usage examples.
+* [ ] Write troubleshooting guide.
+
+---
+
+## Expected Issues and Mitigations
+
+### Issue 1: TRELLIS Container Startup Delay
+
+**Problem**: Pipeline loading takes time (~10 seconds).
+
+**Mitigation**:
+
 ```python
 subprocess.run(["docker", "start", "text2vr_trellis_api"])
-time.sleep(10)  # 로딩 대기
+time.sleep(10)  # wait for loading
 
-# Health check로 확인
-for _ in range(30):  # 최대 30번 시도 (30초)
+# Additional health check loop
+for _ in range(30):  # up to 30 attempts (~30 seconds)
     try:
         health = client.health_check()
         if health['status'] == 'healthy':
@@ -825,19 +845,25 @@ for _ in range(30):  # 최대 30번 시도 (30초)
         time.sleep(1)
 ```
 
-### 이슈 2: 처리 시간 증가
+---
 
-**문제**: 에셋당 30-40초 소요, 3개면 2분 추가
+### Issue 2: Increased Processing Time
 
-**해결방안**:
-- 병렬 처리 고려 (여러 GPU 사용 시)
-- 또는 순차 처리하며 사용자에게 진행 상황 업데이트
+**Problem**: 30–40 seconds per asset; 3 assets → ~2 minutes.
 
-### 이슈 3: 일부 에셋 생성 실패
+**Mitigation**:
 
-**문제**: 특정 에셋이 TRELLIS에서 실패할 수 있음
+* Consider parallelization when multiple GPUs are available.
+* Or keep sequential processing and clearly show progress to the user.
 
-**해결방안**:
+---
+
+### Issue 3: Partial Asset Generation Failures
+
+**Problem**: TRELLIS may fail on some assets.
+
+**Mitigation**:
+
 ```python
 for asset_name, image_paths in cropped_assets.items():
     try:
@@ -845,90 +871,103 @@ for asset_name, image_paths in cropped_assets.items():
         asset_3d_paths[asset_name] = result
     except Exception as e:
         print(f"⚠️ Failed for {asset_name}: {e}")
-        continue  # 다음 에셋 계속 처리
+        continue  # proceed with remaining assets
 ```
 
-### 이슈 4: 투명 배경 처리
+---
 
-**문제**: TRELLIS가 투명 배경을 제대로 처리하지 못할 수 있음
+### Issue 4: Transparent Background Handling
 
-**검증 완료**:
-- `crop_assets_with_transparency()`가 RGBA PNG 생성 ✅
-- TRELLIS API가 RGBA 입력 받음 (`trellis_api_v2.py:136`) ✅
+**Problem**: TRELLIS might not handle transparency properly.
 
-### 이슈 5: VRAM 부족
+**Verified**:
 
-**문제**: 여러 서비스 동시 실행 시 OOM
+* `crop_assets_with_transparency()` generates RGBA PNGs ✅
+* TRELLIS API accepts RGBA input (`trellis_api_v2.py:136`) ✅
 
-**해결방안**:
-- ✅ 이미 구현된 패턴: 각 단계 완료 후 컨테이너 중지
-- TRELLIS도 동일하게 적용
+---
 
-### 이슈 6: 볼륨 마운트 권한
+### Issue 5: VRAM Shortage
 
-**문제**: Docker 볼륨 마운트 시 권한 문제
+**Problem**: Running multiple services concurrently can cause OOM.
 
-**해결방안**:
+**Mitigation**:
+
+* ✅ Pattern already in place: stop containers after each stage.
+* Apply the same pattern to TRELLIS.
+
+---
+
+### Issue 6: Volume Permission Issues
+
+**Problem**: Permission errors on mounted volumes.
+
+**Mitigation**:
+
 ```bash
-# 디렉토리 권한 설정
 chmod -R 755 /home/0in/workspace/Text2VR/output/3d_assets
 ```
 
 ---
 
-## 참고 자료
+## References
 
-### 관련 파일
+### Related Files
 
-- TRELLIS API 가이드: `/home/0in/workspace/TRELLIS_API_Guide.md`
-- TRELLIS API v2: `/home/0in/workspace/Text2VR/TRELLIS_API/trellis_api_v2.py`
-- 현재 워크플로우: `/home/0in/workspace/Text2VR/app/workflows/`
-- Asset Cropper: `/home/0in/workspace/Text2VR/app/workflows/asset_cropper.py`
+* TRELLIS API guide: `/home/0in/workspace/TRELLIS_API_Guide.md`
+* TRELLIS API v2: `/home/0in/workspace/Text2VR/TRELLIS_API/trellis_api_v2.py`
+* Current workflow: `/home/0in/workspace/Text2VR/app/workflows/`
+* Asset cropper: `/home/0in/workspace/Text2VR/app/workflows/asset_cropper.py`
 
-### API 엔드포인트
+### API Endpoints
 
-| 서비스 | 포트 | 엔드포인트 |
-|--------|------|-----------|
+| Service       | Port | Endpoints                       |
+| ------------- | ---- | ------------------------------- |
 | DreamScene360 | 8001 | `/generate`, `/panorama_to_ply` |
-| Segmentation | 8002 | `/segment`, `/status/{task_id}` |
-| Inpainting | 8003 | `/inpaint`, `/status/{task_id}` |
-| **TRELLIS** | **8004** | `/generate-direct`, `/health` |
+| Segmentation  | 8002 | `/segment`, `/status/{task_id}` |
+| Inpainting    | 8003 | `/inpaint`, `/status/{task_id}` |
+| **TRELLIS**   | 8004 | `/generate-direct`, `/health`   |
 
 ---
 
-## 버전 히스토리
+## Version History
 
-- **v1.0** (2025-10-22): 초안 작성 및 검증 완료
-  - Docker 이미지 확인 완료
-  - 디렉토리 구조 검증 완료
-  - API 엔드포인트 검증 완료
-  - VRAM 관리 전략 수립 완료
+* **v1.0** (2025-10-22): Initial draft and verification completed
 
----
-
-## 다음 단계
-
-1. **즉시 실행 가능**:
-   - `mkdir -p /home/0in/workspace/Text2VR/output/3d_assets`
-   - docker-compose.yml 수정
-   - config.py 수정
-
-2. **코드 구현** (1-2시간):
-   - trellis_client.py 작성
-   - asset_3d_generation_node 구현
-   - workflow.py 수정
-
-3. **테스트** (30분):
-   - 단위 테스트
-   - 통합 테스트
-   - VRAM 모니터링
-
-4. **배포**:
-   - Git commit
-   - 문서 업데이트
+  * Verified Docker image.
+  * Verified directory structure.
+  * Verified API endpoints.
+  * Defined VRAM management strategy.
 
 ---
 
-**작성자**: Claude (llmops-expert agent)
-**검증자**: 0in
-**승인 상태**: 검증 완료 ✅
+## Next Steps
+
+1. **Immediately executable**:
+
+   * `mkdir -p /home/0in/workspace/Text2VR/output/3d_assets`
+   * Update `docker-compose.yml`.
+   * Update `config.py`.
+
+2. **Code implementation** (1–2 hours):
+
+   * Implement `trellis_client.py`.
+   * Implement `asset_3d_generation_node`.
+   * Update `workflow.py`.
+
+3. **Testing** (30 minutes):
+
+   * Unit tests.
+   * Integration tests.
+   * VRAM monitoring.
+
+4. **Deployment**:
+
+   * Git commit.
+   * Documentation update.
+
+---
+
+**Author**: Claude (llmops-expert agent)
+**Reviewer**: 0in
+**Approval Status**: Verified ✅
