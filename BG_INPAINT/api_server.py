@@ -26,7 +26,7 @@ app = FastAPI(title="Text2VR Background Inpainting API", version="1.0.0")
 
 # Task storage
 tasks = {}
-WORKING_DIR = "/workspace/inpainted_pano"
+WORKING_DIR = "/workspace/output"
 
 # Global inpainter instance (loaded once)
 inpainter = None
@@ -73,7 +73,7 @@ def inpaint_task(task_id: str, request: InpaintingRequest):
         # Setup paths
         output_dir = os.path.join(WORKING_DIR, request.scene_name)
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, "inpainted_panorama.png")
+        output_path = os.path.join(output_dir, "inpainted.png")
 
         print(f"🎨 Inpainting panorama: {request.panorama_path}")
         print(f"🎭 Mask directory: {request.mask_dir}")

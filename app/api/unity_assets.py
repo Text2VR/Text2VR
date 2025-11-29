@@ -15,14 +15,21 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 
+from ..core.config import settings
 from ..models.panorama import TaskStatus
 from ..services.task_manager import task_manager
 
 router = APIRouter(prefix="/unity", tags=["unity"])
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-GLB_ROOT = PROJECT_ROOT / "output" / "3d_assets"
-PLY_ROOT = PROJECT_ROOT / "plyoutput"
+
+def _get_glb_root(scene_name: str) -> Path:
+    """Get the 3D assets directory for a specific scene."""
+    return settings.output_dir / scene_name / "3d"
+
+
+def _get_ply_root(scene_name: str) -> Path:
+    """Get the PLY directory for a specific scene."""
+    return settings.output_dir / scene_name / "ply"
 
 
 def _validate_within_root(file_path: Path, root: Path) -> None:
@@ -48,9 +55,10 @@ def _get_latest_completed_task():
 )
 def download_glb_asset(scene_name: str, asset_name: str) -> FileResponse:
     """Return a GLB asset produced by the TRELLIS stage."""
-    file_path = (GLB_ROOT / scene_name / f"{asset_name}.glb").resolve()
+    glb_root = _get_glb_root(scene_name)
+    file_path = (glb_root / f"{asset_name}.glb").resolve()
 
-    _validate_within_root(file_path, GLB_ROOT)
+    _validate_within_root(file_path, glb_root)
 
     if not file_path.exists():
         raise HTTPException(
@@ -78,8 +86,9 @@ def download_ply_scene(
     ),
 ) -> FileResponse:
     """Return a Gaussian Splatting PLY file for the requested scene."""
-    scene_dir = (PLY_ROOT / scene_name).resolve()
-    _validate_within_root(scene_dir, PLY_ROOT)
+    ply_root = _get_ply_root(scene_name)
+    scene_dir = ply_root.resolve()
+    _validate_within_root(scene_dir, settings.output_dir)
 
     if not scene_dir.exists():
         raise HTTPException(
@@ -97,7 +106,7 @@ def download_ply_scene(
     for candidate in candidates:
         candidate = candidate.resolve()
         if candidate.exists():
-            _validate_within_root(candidate, PLY_ROOT)
+            _validate_within_root(candidate, settings.output_dir)
             return FileResponse(
                 path=candidate,
                 filename=candidate.name,
@@ -127,13 +136,14 @@ def download_latest_glb_assets() -> StreamingResponse:
         )
 
     buffer = BytesIO()
+    glb_root = _get_glb_root(task.scene_name)
     with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as zip_file:
         for asset_name, asset_path in task.asset_3d_paths.items():
             path_obj = Path(asset_path)
             if not path_obj.exists():
                 continue
             try:
-                _validate_within_root(path_obj.resolve(), GLB_ROOT)
+                _validate_within_root(path_obj.resolve(), glb_root)
             except HTTPException:
                 continue
             zip_file.write(path_obj, arcname=path_obj.name)
@@ -167,8 +177,9 @@ def download_latest_ply() -> FileResponse:
             detail="No completed task with a PLY output found",
         )
 
+    ply_root = _get_ply_root(task.scene_name)
     file_path = Path(task.ply_path).resolve()
-    _validate_within_root(file_path, PLY_ROOT)
+    _validate_within_root(file_path, ply_root)
 
     if not file_path.exists():
         raise HTTPException(

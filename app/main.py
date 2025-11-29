@@ -11,8 +11,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings
-from .api.panorama import router as panorama_router
+from .core.config import settings
+from .api.tasks import router as tasks_router
+from .api.assets import router as assets_router
 from .api.unity_assets import router as unity_assets_router
 from .services.panorama_service import panorama_service
 
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info(f"Starting Text2VR application on {settings.host}:{settings.port}")
-    logger.info(f"Data directory: {settings.data_dir}")
+    logger.info(f"Output directory: {settings.output_dir}")
     logger.info(f"Debug mode: {settings.debug}")
     
     yield
@@ -70,7 +71,8 @@ def create_app() -> FastAPI:
     )
     
     # Include routers
-    app.include_router(panorama_router)
+    app.include_router(tasks_router)
+    app.include_router(assets_router)
     app.include_router(unity_assets_router)
     
     # Static files for web frontend
