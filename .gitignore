@@ -84,3 +84,8 @@ DREAMSCENE360/stitch_diffusion/output/
 .env
 node_modules/
 myenv/
+
+# other
+.claude/
+CLAUDE.md
+AGENTS.md
