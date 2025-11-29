@@ -31,6 +31,9 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 | **3D Scene** | Gaussian Splatting |
 | **Infrastructure** | Docker Compose + NVIDIA Container Toolkit |
 
+- NVIDIA GPU + recent driver
+- [Docker](https://www.docker.com/) and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- [Unity Gaussian Splatting Plugin](https://github.com/aras-p/UnityGaussianSplatting)
 ---
 
 ## System Architecture
