@@ -34,9 +34,9 @@ class InpaintingDefaults:
 @dataclass(frozen=True)
 class GaussianDefaults:
     # Training parameters
-    iterations: int = 7000
-    save_iterations: List[int] = field(default_factory=lambda: [5000, 7000])
-    test_iterations: int = 7000
+    iterations: int = 100
+    save_iterations: List[int] = field(default_factory=lambda: [50, 100])
+    test_iterations: int = 100
     no_perturb_loss: bool = True
     white_background: bool = False
     sh_degree: int = 3
