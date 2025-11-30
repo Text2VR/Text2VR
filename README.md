@@ -11,9 +11,12 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 ## Features
 
 - **End-to-End Pipeline**: Text prompt to VR-ready scene in one command
+- **7-Stage Pipeline Visualization**: Real-time progress tracking with step-by-step feedback
 - **LangGraph Orchestration**: Intelligent workflow with automatic query optimization
 - **Microservice Architecture**: Isolated, scalable Docker containers for each AI model
-- **Real-time Progress**: React frontend with progressive result visualization
+- **Interactive 360° Viewer**: A-Frame based panorama viewer with VR support
+- **Progressive Results**: Watch each stage complete in real-time
+- **Asset Downloads**: Export panoramas, 3D GLB models, and PLY point clouds
 - **VRAM Optimization**: Automatic container lifecycle management
 
 ---
@@ -22,7 +25,7 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 
 | Layer | Technology |
 |-------|------------|
-| **Frontend** | React + TypeScript + Vite |
+| **Frontend** | React 19 + TypeScript + Vite + A-Frame |
 | **Backend** | FastAPI + LangGraph + LangChain |
 | **Panorama** | DreamScene360 (Stable Diffusion + Stitch Diffusion) |
 | **Segmentation** | GroundingDINO + SAM + GPT-4o |
@@ -31,14 +34,43 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 | **3D Scene** | Gaussian Splatting |
 | **Infrastructure** | Docker Compose + NVIDIA Container Toolkit |
 
-- NVIDIA GPU + recent driver
-- [Docker](https://www.docker.com/) and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-- [Unity Gaussian Splatting Plugin](https://github.com/aras-p/UnityGaussianSplatting)
 ---
 
 ## System Architecture
 
-![Pipeline Flow](docs/pipeline.png)
+### Pipeline Flow
+
+```
+┌──────────────────┐
+│  Query Rewrite   │ GPT-4o optimizes user prompt
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│    Panorama      │ DreamScene360 generates 360° image
+│   Generation     │
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│  Segmentation    │ GroundingDINO + SAM + GPT-4o
+│                  │ Extracts objects with transparency
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│  Asset Cropping  │ Creates transparent PNG assets
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│  3D Generation   │ TRELLIS converts 2D → 3D GLB
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│   Inpainting     │ SD2 fills removed object areas
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│  PLY Generation  │ Gaussian Splatting training
+└──────────────────┘
+```
 
 ### Microservices
 
@@ -49,97 +81,74 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 | `inpainting-api` | 8003 | SD2 Inpaint - Background inpainting |
 | `trellis-api` | 8004 | TRELLIS - 2D to 3D asset conversion |
 
-### LangGraph Workflow
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Query Rewrite  │────▶│    Panorama     │────▶│  Segmentation   │
-│     (LLM)       │     │   Generation    │     │ (DINO+SAM+GPT)  │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                                        │
-┌─────────────────┐     ┌─────────────────┐     ┌───────▼─────────┐
-│  PLY Generation │◀────│   Inpainting    │◀────│ 3D Asset Gen    │
-│    (GS Train)   │     │     (SD2)       │     │   (TRELLIS)     │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-```
-
----
-
-## Pipeline Stages
-
-### Stage 1: Query Rewrite
-Transforms user input into optimized prompts for panorama generation using LLM (GPT-4o).
-
-### Stage 2: Panorama Generation
-Generates 360° equirectangular panorama using DreamScene360 with optional self-refinement.
-
-### Stage 3: Asset Segmentation
-- **GPT-4o**: Identifies interactive objects in the scene
-- **GroundingDINO**: Detects object bounding boxes from text prompts
-- **SAM**: Generates precise segmentation masks
-- **Asset Cropper**: Extracts individual assets with transparency
-
-### Stage 4: 3D Asset Generation
-Converts 2D segmented assets to 3D GLB models using TRELLIS.
-
-### Stage 5: Background Inpainting
-Removes segmented objects and fills background seamlessly using Stable Diffusion 2 Inpaint with wrap-aware padding.
-
-### Stage 6: Gaussian Splatting
-Trains 3D Gaussian Splatting model from the inpainted panorama for immersive VR rendering.
-
----
-
-## Results Gallery
-
-| | |
-|:---:|:---:|
-| ![Result 1](docs/results/result_1.png) | ![Result 2](docs/results/result_2.png) |
-
----
-
-## Prerequisites
-
-- **NVIDIA GPU** with 12GB+ VRAM (recommended: L40S)
-- **Docker** and **Docker Compose**
-- **NVIDIA Container Toolkit**
-- **OpenAI API Key** (for GPT-4o)
-
 ---
 
 ## Project Structure
 
 ```
 Text2VR/
-├── app/                          # Backend application
+├── app/                          # FastAPI Backend
+│   ├── main.py                   # Application entry point
+│   ├── api/                      # API routers
+│   │   ├── tasks.py              # Task management (/generate, /status)
+│   │   ├── assets.py             # Asset serving
+│   │   └── unity_assets.py       # Unity export endpoints
+│   ├── services/                 # Business logic
+│   │   ├── task_manager.py       # Task state management
+│   │   ├── panorama_service.py   # Workflow execution
+│   │   ├── docker_service.py     # Container management
+│   │   └── image_processing.py   # Image utilities
+│   ├── clients/                  # Microservice clients
+│   │   ├── panorama.py           # DreamScene360 client
+│   │   ├── segmentation.py       # Segmentation client
+│   │   ├── inpainting.py         # Inpainting client
+│   │   └── trellis.py            # TRELLIS client
 │   ├── workflows/                # LangGraph workflow
-│   │   ├── workflow.py           # Main workflow assembly
-│   │   ├── nodes.py              # Pipeline node implementations
-│   │   ├── states.py             # Workflow state definitions
-│   │   ├── defaults.py           # API parameter defaults
-│   │   ├── pano_client.py        # DreamScene360 API client
-│   │   ├── segmentation_client.py
-│   │   ├── inpainting_client.py
-│   │   └── trellis_client.py
-│   ├── api/                      # FastAPI endpoints
-│   └── services/                 # Task management
-├── src/                          # React frontend
-│   ├── components/               # UI components
-│   ├── services/                 # API service layer
-│   └── types/                    # TypeScript definitions
-├── DREAMSCENE360/                # Panorama generation service
-├── ASSET_SEG/                    # Segmentation service
-├── BG_INPAINT/                   # Inpainting service
-├── TRELLIS_API/                  # 3D generation service
+│   │   ├── workflow.py           # Main workflow definition
+│   │   └── steps/                # Pipeline stages
+│   │       ├── generation.py     # Query rewrite & panorama
+│   │       ├── segmentation.py   # Asset segmentation
+│   │       ├── three_d.py        # 3D generation & PLY
+│   │       └── inpainting.py     # Background inpainting
+│   ├── models/                   # Pydantic models
+│   └── core/                     # Config & utilities
+│
+├── src/                          # React Frontend
+│   ├── main.tsx                  # React entry point
+│   ├── App.tsx                   # Main component
+│   ├── App.css                   # Design system & styles
+│   ├── components/
+│   │   ├── Header.tsx            # App header with logo
+│   │   ├── PipelineStepper.tsx   # 7-stage progress indicator
+│   │   ├── InputPanel.tsx        # Scene input & advanced options
+│   │   ├── ResultPanel.tsx       # Tabbed viewer (Panorama/Seg/Inpainted)
+│   │   ├── DownloadHub.tsx       # Asset download buttons
+│   │   └── ...
+│   ├── services/
+│   │   └── apiService.ts         # Backend API abstraction
+│   └── types/
+│       └── api.ts                # TypeScript definitions
+│
+├── DREAMSCENE360/                # Panorama generation module
+├── ASSET_SEG/                    # Segmentation module
+├── BG_INPAINT/                   # Inpainting module
+├── output/                       # Generated results
 ├── docker-compose.yml            # Service orchestration
-├── orchestrator.py               # FastAPI orchestrator
-├── data/                         # Generated panoramas
-├── masking_output/               # Segmentation results
-├── inpainted_pano/               # Inpainted panoramas
-├── output/3d_assets/             # Generated 3D GLB files
-├── plyoutput/                    # Gaussian Splatting PLY files
-└── pre_checkpoints/              # Pretrained model weights
+├── package.json                  # Node.js dependencies
+├── vite.config.ts                # Vite configuration
+└── tsconfig.json                 # TypeScript configuration
 ```
+
+---
+
+## Prerequisites
+
+- **NVIDIA GPU** with 12GB+ VRAM (recommended: RTX 4090, L40S)
+- **Docker** and **Docker Compose**
+- **NVIDIA Container Toolkit**
+- **Node.js** 18+ and **npm**
+- **Python** 3.10+
+- **OpenAI API Key** (for GPT-4o)
 
 ---
 
@@ -149,12 +158,17 @@ Text2VR/
 
 ```bash
 # Clone repository
-git clone https://github.com/your-repo/Text2VR.git
+git clone https://github.com/Text2VR/Text2VR.git
 cd Text2VR
 
 # Create .env file
 cat > .env << 'EOF'
 OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o
+DREAMSCENE_API_URL=http://localhost:8001
+SEGMENTATION_API_URL=http://localhost:8002
+INPAINTING_API_URL=http://localhost:8003
+TRELLIS_API_URL=http://localhost:8004
 EOF
 ```
 
@@ -167,118 +181,218 @@ mkdir -p pre_checkpoints
 wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth \
   -O pre_checkpoints/sam_vit_h_4b8939.pth
 
-# DreamScene360 DPT-Depth (download from Dropbox)
-# https://www.dropbox.com/scl/fo/348s01x0trt0yxb934cwe/h?rlkey=a96g2incso7g53evzamzo0j0y&dl=0
+# DreamScene360 DPT-Depth
+# Download from: https://www.dropbox.com/scl/fo/348s01x0trt0yxb934cwe/h
 # Place omnidata_dpt_depth_v2.ckpt in pre_checkpoints/
 ```
 
-### 3. Run Services
+### 3. Install Dependencies
 
-**Terminal 1: Start AI Services (Docker)**
 ```bash
-# From project root (Text2VR/)
+# Frontend dependencies
+npm install
+
+# Backend dependencies (using virtual environment)
+python -m venv myenv
+source myenv/bin/activate  # Linux/Mac
+# or: myenv\Scripts\activate  # Windows
+pip install -r requirements.txt
+```
+
+### 4. Run Services
+
+**Terminal 1: Start AI Microservices**
+```bash
 docker-compose up -d
 ```
 
 **Terminal 2: Start Backend API**
 ```bash
-# From project root (Text2VR/)
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+source myenv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Terminal 3: Start Frontend**
 ```bash
-# From project root (Text2VR/src)
-npm install  # first time only
 npm run dev
 ```
 
-### 4. Generate VR Scene
+### 5. Generate VR Scene
 
 1. Open http://localhost:3000 in your browser
 2. Enter your scene description (e.g., "A cozy living room with a fireplace")
-3. Click Generate and watch the pipeline progress in real-time
+3. (Optional) Expand "Advanced Options" to configure:
+   - Self Refinement
+   - Number of Prompts
+   - Max Rounds
+4. Click **Generate Scene** and watch the 7-stage pipeline progress
+
+---
+
+## Frontend Features
+
+### Pipeline Stepper
+Real-time visualization of the 7 pipeline stages:
+1. **Query** - Prompt optimization
+2. **Pano** - 360° panorama generation
+3. **Seg** - Object segmentation
+4. **Crop** - Asset extraction
+5. **3D** - GLB model generation
+6. **Inpaint** - Background restoration
+7. **PLY** - Gaussian splatting
+
+### Tabbed Viewer
+- **Panorama**: Interactive 360° viewer (drag to rotate)
+- **Segmentation**: Grid of extracted assets with labels
+- **Inpainted**: Final panorama with objects removed
+
+### Download Hub
+- **Panorama**: PNG image download
+- **3D Assets**: ZIP of all GLB models
+- **Point Cloud**: PLY file for Gaussian Splatting
 
 ---
 
 ## API Reference
 
-### Generate Panorama
-```
+### Generate Scene
+```http
 POST /generate
+Content-Type: application/json
+
 {
-  "text": "Scene description",
-  "scene_name": "optional_scene_name"
+  "text": "A modern office with large windows",
+  "scene_name": "my-office",
+  "use_self_refinement": false,
+  "num_prompt": 3,
+  "max_rounds": 3
 }
 ```
 
 ### Check Status
-```
+```http
 GET /status/{task_id}
 ```
 
-### Get Panorama Image
-```
-GET /panorama/{task_id}
-```
+Response includes:
+- `status`: queued | processing | completed | failed
+- `message`: Current stage description
+- `panorama_path`: Path when panorama is ready
+- `segmentation_visualization_path`: Segmentation result
+- `inpainted_panorama_path`: Final inpainted image
+- `asset_3d_paths`: Dictionary of GLB file paths
+- `ply_path`: Gaussian splatting model path
 
-### List All Tasks
-```
-GET /tasks
+### Download Assets
+```http
+GET /panorama/{task_id}          # PNG panorama
+GET /inpainted/{task_id}         # Inpainted panorama
+GET /segmentation/{task_id}      # Asset list JSON
+GET /unity/latest/assets.zip     # All 3D assets
+GET /unity/latest/scene.ply      # PLY point cloud
 ```
 
 ---
 
 ## Configuration
 
-### Workflow Parameters
+### Environment Variables (.env)
 
-All API parameters are centralized in `app/workflows/defaults.py`:
+```bash
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+
+# Microservice URLs
+DREAMSCENE_API_URL=http://localhost:8001
+SEGMENTATION_API_URL=http://localhost:8002
+INPAINTING_API_URL=http://localhost:8003
+TRELLIS_API_URL=http://localhost:8004
+
+# Development
+MOCK_PIPELINE_MODE=false  # Enable for demo without GPU
+```
+
+### Workflow Parameters (app/core/constants.py)
 
 ```python
 # Panorama generation
-PANORAMA_DEFAULTS.use_self_refinement = True
-PANORAMA_DEFAULTS.num_prompt = 5
-PANORAMA_DEFAULTS.max_rounds = 3
-
-# Segmentation
-SEGMENTATION_DEFAULTS.sam_checkpoint = "/app/checkpoints/sam_vit_h_4b8939.pth"
+use_self_refinement = True
+num_prompt = 5
+max_rounds = 3
 
 # Inpainting
-INPAINTING_DEFAULTS.strength = 0.85
-INPAINTING_DEFAULTS.guidance = 7.5
-INPAINTING_DEFAULTS.steps = 30
+strength = 0.85
+guidance = 7.5
+steps = 30
 
 # Gaussian Splatting
-GAUSSIAN_DEFAULTS.iterations = 3000
-GAUSSIAN_DEFAULTS.sh_degree = 3
+iterations = 3000
+sh_degree = 3
 ```
 
 ---
 
 ## Development
 
-### Individual Service Development
-
-```bash
-# Enter specific container for debugging
-docker-compose run --rm panorama-api /bin/bash
-docker-compose run --rm segmentation-api /bin/bash
-docker-compose run --rm inpainting-api /bin/bash
-docker-compose run --rm trellis-api /bin/bash
-```
-
 ### Frontend Development
 
 ```bash
-# Install dependencies
-npm install
-
-# Start dev server with hot reload
+# Development with hot reload
 npm run dev
 
-# Build for production
+# Production build
 npm run build
+
+# Preview production build
+npm run preview
+```
+
+### Backend Development
+
+```bash
+# Activate virtual environment
+source myenv/bin/activate
+
+# Run with auto-reload
+uvicorn app.main:app --reload --port 8000
+
+# Run tests
+pytest app/
+```
+
+### Docker Services
+
+```bash
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Restart specific service
+docker-compose restart panorama-api
+
+# Stop all services
+docker-compose down
+```
+
+---
+
+## Output Structure
+
+```
+output/{scene_name}/
+├── stitch/
+│   └── im_0.png              # Generated panorama
+├── masking/
+│   ├── masks/                # Object masks
+│   ├── visualizations/       # Segmentation visualization
+│   └── results.json          # Segmentation metadata
+├── assets/                   # Cropped assets (transparent PNG)
+├── 3d/                       # GLB 3D models
+├── ply/                      # Gaussian splatting models
+└── inpainted.png             # Final inpainted panorama
 ```
 
 ---
@@ -286,22 +400,36 @@ npm run build
 ## Troubleshooting
 
 ### VRAM Issues
-The pipeline automatically stops containers after each stage to free VRAM. If you encounter OOM errors:
 ```bash
-# Manually stop all containers
+# Stop all containers to free VRAM
 docker-compose down
 
 # Check GPU memory
 nvidia-smi
+
+# The pipeline automatically manages container lifecycle
 ```
 
-### Service Health Check
+### Service Health
 ```bash
-# Check all service logs
-docker-compose logs -f
+# Check all services
+docker-compose ps
 
-# Check specific service
+# View specific service logs
 docker-compose logs panorama-api
+
+# Restart failed service
+docker-compose restart segmentation-api
+```
+
+### Frontend Issues
+```bash
+# Clear cache and rebuild
+rm -rf node_modules web-dist
+npm install
+npm run build
+
+# Force refresh in browser: Ctrl+Shift+R
 ```
 
 ---
@@ -310,8 +438,9 @@ docker-compose logs panorama-api
 
 - [ ] Unity VR integration for HMD deployment
 - [ ] Multi-GPU support for parallel processing
-- [ ] Real-time collaborative editing
+- [ ] WebXR direct VR viewing
 - [ ] Custom model fine-tuning interface
+- [ ] Real-time collaborative editing
 
 ---
 
@@ -323,8 +452,9 @@ MIT License
 
 ## Acknowledgments
 
-- [DreamScene360](https://github.com/xxx) - Panorama generation
+- [DreamScene360](https://github.com/dreamscene360) - Panorama generation
 - [Segment Anything (SAM)](https://github.com/facebookresearch/segment-anything)
 - [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO)
-- [TRELLIS](https://github.com/xxx) - 3D generation
+- [TRELLIS](https://github.com/microsoft/TRELLIS) - 3D generation
 - [LangGraph](https://github.com/langchain-ai/langgraph) - Workflow orchestration
+- [A-Frame](https://aframe.io/) - WebVR framework
