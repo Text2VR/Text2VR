@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .nodes import (
+from .steps.generation import (
     panorama_generation_node,
     query_rewrite_node,
-    segmentation_node,
+)
+from .steps.segmentation import segmentation_node
+from .steps.three_d import (
     asset_3d_generation_node,
-    inpainting_node,
     ply_generation_node,
 )
-from .states import WorkflowState
+from .steps.inpainting import inpainting_node
+from ..models.workflow_state import WorkflowState
 
 
 def create_workflow():

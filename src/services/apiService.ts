@@ -1,11 +1,7 @@
-import { GenerateRequest, GenerateResponse, StatusResponse, HealthResponse } from '../types/api';
+import { GenerateRequest, GenerateResponse, StatusResponse, HealthResponse, SegmentedAsset } from '../types/api';
 
 class ApiService {
-  private baseUrl = '';
-
   async generatePanorama(request: GenerateRequest): Promise<GenerateResponse> {
-    console.log('[API] Sending generate request:', request);
-
     const response = await fetch('/generate', {
       method: 'POST',
       headers: {
@@ -14,17 +10,13 @@ class ApiService {
       body: JSON.stringify(request),
     });
 
-    console.log('[API] Generate response status:', response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[API] Generate error response:', errorText);
+      console.error('[API] Generate error:', errorText);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
-    console.log('[API] Generate response data:', data);
-    return data;
+    return response.json();
   }
 
   async getStatus(taskId: string): Promise<StatusResponse> {
@@ -41,7 +33,7 @@ class ApiService {
     return `/panorama/${taskId}?t=${Date.now()}`;
   }
 
-  async getSegmentationAssets(taskId: string): Promise<Array<{name: string, url: string}>> {
+  async getSegmentationAssets(taskId: string): Promise<SegmentedAsset[]> {
     const response = await fetch(`/segmentation/${taskId}`);
 
     if (!response.ok) {
@@ -64,6 +56,39 @@ class ApiService {
     }
 
     return response.json();
+  }
+
+  // New methods for 3D assets and PLY downloads
+  async download3DAssets(sceneName?: string): Promise<Blob> {
+    const url = sceneName
+      ? `/unity/${sceneName}/assets.zip`
+      : '/unity/latest/assets.zip';
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status}`);
+    }
+
+    return response.blob();
+  }
+
+  async downloadPLY(sceneName?: string): Promise<Blob> {
+    const url = sceneName
+      ? `/unity/${sceneName}/scene.ply`
+      : '/unity/latest/scene.ply';
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status}`);
+    }
+
+    return response.blob();
+  }
+
+  get3DAssetUrl(sceneName: string, assetName: string): string {
+    return `/unity/${sceneName}/assets/${assetName}.glb`;
   }
 }
 
