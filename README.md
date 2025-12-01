@@ -37,7 +37,7 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 
 ## System Architecture
 
-![Pipeline Flow](docs/pipeline.png)
+![Pipeline Flow](docs/pipeline_overview.png)
 
 ### Microservices
 
