@@ -245,28 +245,29 @@ GET /tasks
 
 ## Configuration
 
-### Workflow Parameters
+### Environment Variables
 
-All API parameters are centralized in `app/workflows/defaults.py`:
+Create a `.env` file in the project root with the following variables:
 
-```python
-# Panorama generation
-PANORAMA_DEFAULTS.use_self_refinement = True
-PANORAMA_DEFAULTS.num_prompt = 2
-PANORAMA_DEFAULTS.max_rounds = 2
+```bash
+# Required
+OPENAI_API_KEY=your_openai_api_key_here
 
-# Segmentation
-SEGMENTATION_DEFAULTS.sam_checkpoint = "/app/checkpoints/sam_vit_h_4b8939.pth"
+# Optional - OpenAI settings
+OPENAI_MODEL=gpt-4o              # Default: gpt-4o
+OPENAI_TEMPERATURE=0.7           # Default: 0.7
 
-# Inpainting
-INPAINTING_DEFAULTS.strength = 0.95
-INPAINTING_DEFAULTS.guidance = 7.5
-INPAINTING_DEFAULTS.steps = 40
+# Optional - Service URLs (if running on different hosts)
+DREAMSCENE_API_URL=http://localhost:8001
+SEGMENTATION_API_URL=http://localhost:8002
+INPAINTING_API_URL=http://localhost:8003
+TRELLIS_API_URL=http://localhost:8004
 
-# Gaussian Splatting
-GAUSSIAN_DEFAULTS.iterations = 7000
-GAUSSIAN_DEFAULTS.sh_degree = 3
+# Optional - Logging
+LOG_LEVEL=INFO                   # DEBUG, INFO, WARNING, ERROR
 ```
+
+Configuration is managed in `app/core/config.py`.
 
 ---
 
