@@ -320,15 +320,6 @@ docker-compose logs panorama-api
 
 ---
 
-## Roadmap
-
-- [ ] Unity VR integration for HMD deployment
-- [ ] Multi-GPU support for parallel processing
-- [ ] Real-time collaborative editing
-- [ ] Custom model fine-tuning interface
-
----
-
 ## License
 
 MIT License
