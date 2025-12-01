@@ -172,7 +172,19 @@ wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth \
 # Place omnidata_dpt_depth_v2.ckpt in pre_checkpoints/
 ```
 
-### 3. Run Services
+### 3. Pull Docker Images from Docker Hub
+
+```bash
+# Pull all required images from Docker Hub
+docker pull 0in11/text2vr-dreamscene360:v3
+docker pull 0in11/text2vr-asset_seg:v2
+docker pull 0in11/text2vr-bg_inpaint:v3
+docker pull 0in11/trellis:v1
+```
+
+> **Note**: These images are pre-built and ready to use. Total download size is approximately 30-40GB.
+
+### 4. Run Services
 
 **Terminal 1: Start AI Services (Docker)**
 ```bash
@@ -193,7 +205,7 @@ npm install  # first time only
 npm run dev
 ```
 
-### 4. Generate VR Scene
+### 5. Generate VR Scene
 
 1. Open http://localhost:3000 in your browser
 2. Enter your scene description (e.g., "A cozy living room with a fireplace")
