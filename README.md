@@ -114,17 +114,26 @@ Trains 3D Gaussian Splatting model from the inpainted panorama for immersive VR 
 ```
 Text2VR/
 ├── app/                          # Backend application
-│   ├── workflows/                # LangGraph workflow
-│   │   ├── workflow.py           # Main workflow assembly
-│   │   ├── nodes.py              # Pipeline node implementations
-│   │   ├── states.py             # Workflow state definitions
-│   │   ├── defaults.py           # API parameter defaults
-│   │   ├── pano_client.py        # DreamScene360 API client
-│   │   ├── segmentation_client.py
-│   │   ├── inpainting_client.py
-│   │   └── trellis_client.py
-│   ├── api/                      # FastAPI endpoints
-│   └── services/                 # Task management
+│   ├── main.py                   # FastAPI entry point
+│   ├── api/                      # API endpoints
+│   │   ├── tasks.py              # Task management endpoints
+│   │   ├── assets.py             # Asset serving
+│   │   └── unity_assets.py       # Unity export endpoints
+│   ├── clients/                  # Microservice clients
+│   │   ├── panorama.py           # DreamScene360 client
+│   │   ├── segmentation.py       # Segmentation client
+│   │   ├── inpainting.py         # Inpainting client
+│   │   └── trellis.py            # TRELLIS client
+│   ├── core/                     # Configuration & utilities
+│   │   ├── config.py             # Environment settings
+│   │   └── constants.py          # Constants
+│   ├── models/                   # Pydantic models
+│   ├── services/                 # Business logic
+│   │   ├── task_manager.py       # Task state management
+│   │   └── panorama_service.py   # Workflow execution
+│   └── workflows/                # LangGraph workflow
+│       ├── workflow.py           # Main workflow definition
+│       └── steps/                # Pipeline stages
 ├── src/                          # React frontend
 │   ├── components/               # UI components
 │   ├── services/                 # API service layer
@@ -132,14 +141,8 @@ Text2VR/
 ├── DREAMSCENE360/                # Panorama generation service
 ├── ASSET_SEG/                    # Segmentation service
 ├── BG_INPAINT/                   # Inpainting service
-├── TRELLIS_API/                  # 3D generation service
 ├── docker-compose.yml            # Service orchestration
-├── orchestrator.py               # FastAPI orchestrator
-├── data/                         # Generated panoramas
-├── masking_output/               # Segmentation results
-├── inpainted_pano/               # Inpainted panoramas
-├── output/3d_assets/             # Generated 3D GLB files
-├── plyoutput/                    # Gaussian Splatting PLY files
+├── output/                       # Generated results
 └── pre_checkpoints/              # Pretrained model weights
 ```
 
