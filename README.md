@@ -16,6 +16,8 @@ Text2VR orchestrates multiple AI models through a **LangGraph-based workflow** w
 - **Real-time Progress**: React frontend with progressive result visualization
 - **VRAM Optimization**: Automatic container lifecycle management
 
+![Web Interface](docs/web-ui.png)
+
 ---
 
 ## Tech Stack
