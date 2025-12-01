@@ -272,6 +272,39 @@ LOG_LEVEL=INFO                   # DEBUG, INFO, WARNING, ERROR
 
 Configuration is managed in `app/core/config.py`.
 
+### Workflow Parameters
+
+Pipeline parameters can be customized in `app/core/constants.py`:
+
+#### Panorama Generation
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `use_self_refinement` | `False` | Enable iterative refinement for better quality |
+| `num_prompt` | `2` | Number of prompt variations to generate |
+| `max_rounds` | `2` | Maximum refinement iterations |
+
+#### Inpainting
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `strength` | `0.95` | Denoising strength (0.0-1.0) |
+| `guidance` | `7.5` | Classifier-free guidance scale |
+| `steps` | `40` | Number of inference steps |
+| `seed` | `42` | Random seed for reproducibility |
+
+#### 3D Generation (TRELLIS)
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `simplify` | `0.95` | Mesh simplification ratio |
+| `texture_size` | `1024` | Output texture resolution |
+| `ss_sampling_steps` | `12` | Structured latent sampling steps |
+
+#### Gaussian Splatting
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `iterations` | `100` | Training iterations |
+| `sh_degree` | `3` | Spherical harmonics degree |
+| `gen_res` | `512` | Generation resolution |
+
 ---
 
 ## Development
